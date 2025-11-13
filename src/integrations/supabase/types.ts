@@ -14,6 +14,79 @@ export type Database = {
   }
   public: {
     Tables: {
+      avaliacoes: {
+        Row: {
+          comentario: string | null
+          created_at: string | null
+          curso_id: number | null
+          data: string | null
+          id: string
+          nome: string
+          nota: number
+        }
+        Insert: {
+          comentario?: string | null
+          created_at?: string | null
+          curso_id?: number | null
+          data?: string | null
+          id?: string
+          nome: string
+          nota: number
+        }
+        Update: {
+          comentario?: string | null
+          created_at?: string | null
+          curso_id?: number | null
+          data?: string | null
+          id?: string
+          nome?: string
+          nota?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "avaliacoes_curso_id_fkey"
+            columns: ["curso_id"]
+            isOneToOne: false
+            referencedRelation: "cursos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      carrinhos_abandonados: {
+        Row: {
+          created_at: string | null
+          curso_id: number | null
+          data_abandono: string | null
+          email: string | null
+          id: string
+          telefone: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          curso_id?: number | null
+          data_abandono?: string | null
+          email?: string | null
+          id?: string
+          telefone?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          curso_id?: number | null
+          data_abandono?: string | null
+          email?: string | null
+          id?: string
+          telefone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "carrinhos_abandonados_curso_id_fkey"
+            columns: ["curso_id"]
+            isOneToOne: false
+            referencedRelation: "cursos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cursos: {
         Row: {
           "Área de Atuação": string | null
@@ -24,6 +97,7 @@ export type Database = {
           "Estuda Por / Contrato com": string | null
           "Horário de Aula": string | null
           id: number
+          ImagemCapa: string | null
           "Link Cronograma": string | null
           "Link e-MEC Curso": string | null
           Modalidade: string | null
@@ -57,6 +131,7 @@ export type Database = {
           "Estuda Por / Contrato com"?: string | null
           "Horário de Aula"?: string | null
           id?: number
+          ImagemCapa?: string | null
           "Link Cronograma"?: string | null
           "Link e-MEC Curso"?: string | null
           Modalidade?: string | null
@@ -90,6 +165,7 @@ export type Database = {
           "Estuda Por / Contrato com"?: string | null
           "Horário de Aula"?: string | null
           id?: number
+          ImagemCapa?: string | null
           "Link Cronograma"?: string | null
           "Link e-MEC Curso"?: string | null
           Modalidade?: string | null
@@ -115,6 +191,53 @@ export type Database = {
           "Tipo de Certificação"?: string | null
         }
         Relationships: []
+      }
+      matriculas: {
+        Row: {
+          aluno_cpf: string | null
+          aluno_email: string
+          aluno_nome: string
+          aluno_telefone: string | null
+          created_at: string | null
+          curso_id: number | null
+          data_compra: string | null
+          forma_pagamento: string
+          id: string
+          valor_pago: string
+        }
+        Insert: {
+          aluno_cpf?: string | null
+          aluno_email: string
+          aluno_nome: string
+          aluno_telefone?: string | null
+          created_at?: string | null
+          curso_id?: number | null
+          data_compra?: string | null
+          forma_pagamento: string
+          id?: string
+          valor_pago: string
+        }
+        Update: {
+          aluno_cpf?: string | null
+          aluno_email?: string
+          aluno_nome?: string
+          aluno_telefone?: string | null
+          created_at?: string | null
+          curso_id?: number | null
+          data_compra?: string | null
+          forma_pagamento?: string
+          id?: string
+          valor_pago?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matriculas_curso_id_fkey"
+            columns: ["curso_id"]
+            isOneToOne: false
+            referencedRelation: "cursos"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
