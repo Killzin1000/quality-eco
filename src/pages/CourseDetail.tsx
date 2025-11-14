@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Navbar } from "@/components/Navbar";
@@ -14,6 +14,7 @@ import {
   CheckCircle2, ExternalLink, Calendar, Users 
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface Curso {
   id: number;
@@ -44,11 +45,23 @@ const CourseDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [curso, setCurso] = useState<Curso | null>(null);
   const [loading, setLoading] = useState(true);
+  const { trackCourseView, updateViewDuration } = useAnalytics();
+  const startTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (id) {
       fetchCurso();
+      // Rastrear visualização quando a página carrega
+      trackCourseView(parseInt(id), new URLSearchParams(window.location.search).get("origem") || "direto");
     }
+
+    // Atualizar duração ao sair da página
+    return () => {
+      if (id) {
+        const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        updateViewDuration(parseInt(id), duration);
+      }
+    };
   }, [id]);
 
   const fetchCurso = async () => {
