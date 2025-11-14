@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Shield, CreditCard, Smartphone, Barcode } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 const checkoutSchema = z.object({
   nome: z.string().trim().min(3, "Nome deve ter pelo menos 3 caracteres").max(100, "Nome muito longo"),
@@ -35,6 +36,7 @@ const Checkout = () => {
   const [curso, setCurso] = useState<Curso | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const { markConversion, trackEvent } = useAnalytics();
   
   const [formData, setFormData] = useState({
     nome: "",
@@ -210,7 +212,23 @@ const Checkout = () => {
           .from("cupons")
           .update({ uso_atual: cupomValido.uso_atual + 1 })
           .eq("id", cupomValido.id);
+
+        // Marcar cupom como usado se for exit-intent
+        if (cupomValido.tipo === "exit_intent") {
+          await supabase
+            .from("leads_exit_intent")
+            .update({ cupom_usado: true })
+            .eq("cupom_codigo", cupomValido.codigo);
+        }
       }
+
+      // Marcar conversão no analytics
+      await markConversion();
+      await trackEvent("matricula_concluida", "checkout_form", {
+        curso_id: parseInt(id!),
+        forma_pagamento: formData.formaPagamento,
+        usou_cupom: !!cupomValido,
+      });
 
       toast.success("Matrícula realizada com sucesso!", {
         description: "Você receberá um email com as instruções.",
