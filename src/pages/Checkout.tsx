@@ -42,9 +42,12 @@ const Checkout = () => {
     telefone: "",
     cpf: "",
     formaPagamento: "pix",
+    cupom: "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [cupomValido, setCupomValido] = useState<any>(null);
+  const [validandoCupom, setValidandoCupom] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -106,6 +109,76 @@ const Checkout = () => {
     }
   };
 
+  const parsePreco = (preco: string | null): number => {
+    if (!preco) return 0;
+    // Remove "R$", espaços e converte vírgula para ponto
+    const valorLimpo = preco.replace(/[R$\s]/g, "").replace(",", ".");
+    return parseFloat(valorLimpo) || 0;
+  };
+
+  const calcularValorFinal = () => {
+    const precoBase = getPreco();
+    const valorNumerico = parsePreco(precoBase);
+    
+    if (cupomValido && valorNumerico > 0) {
+      const desconto = (valorNumerico * cupomValido.desconto_percentual) / 100;
+      return valorNumerico - desconto;
+    }
+    
+    return valorNumerico;
+  };
+
+  const formatarPreco = (valor: number): string => {
+    return `R$ ${valor.toFixed(2).replace(".", ",")}`;
+  };
+
+  const validarCupom = async () => {
+    if (!formData.cupom.trim()) {
+      setCupomValido(null);
+      return;
+    }
+
+    setValidandoCupom(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from("cupons")
+        .select("*")
+        .eq("codigo", formData.cupom.trim().toUpperCase())
+        .eq("ativo", true)
+        .single();
+
+      if (error || !data) {
+        toast.error("Cupom inválido ou expirado");
+        setCupomValido(null);
+        return;
+      }
+
+      // Verificar se atingiu uso máximo
+      if (data.uso_atual >= data.uso_maximo) {
+        toast.error("Este cupom já atingiu o limite de usos");
+        setCupomValido(null);
+        return;
+      }
+
+      // Verificar expiração
+      if (data.data_expiracao && new Date(data.data_expiracao) < new Date()) {
+        toast.error("Este cupom está expirado");
+        setCupomValido(null);
+        return;
+      }
+
+      setCupomValido(data);
+      toast.success(`Cupom aplicado! ${data.desconto_percentual}% de desconto`);
+    } catch (error) {
+      console.error("Erro ao validar cupom:", error);
+      toast.error("Erro ao validar cupom");
+      setCupomValido(null);
+    } finally {
+      setValidandoCupom(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
@@ -116,6 +189,8 @@ const Checkout = () => {
 
       setSubmitting(true);
 
+      const valorFinal = calcularValorFinal();
+
       // Salvar matrícula
       const { error } = await supabase.from("matriculas").insert({
         curso_id: parseInt(id!),
@@ -124,10 +199,18 @@ const Checkout = () => {
         aluno_telefone: formData.telefone,
         aluno_cpf: formData.cpf,
         forma_pagamento: formData.formaPagamento,
-        valor_pago: getPreco() || "Consultar",
+        valor_pago: formatarPreco(valorFinal),
       });
 
       if (error) throw error;
+
+      // Se usou cupom, atualizar contador de uso
+      if (cupomValido) {
+        await supabase
+          .from("cupons")
+          .update({ uso_atual: cupomValido.uso_atual + 1 })
+          .eq("id", cupomValido.id);
+      }
 
       toast.success("Matrícula realizada com sucesso!", {
         description: "Você receberá um email com as instruções.",
@@ -256,6 +339,40 @@ const Checkout = () => {
 
                 <Card>
                   <CardHeader>
+                    <CardTitle>Cupom de Desconto</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <Input
+                          value={formData.cupom}
+                          onChange={(e) => {
+                            setFormData({ ...formData, cupom: e.target.value.toUpperCase() });
+                            setCupomValido(null);
+                          }}
+                          placeholder="Digite o código do cupom"
+                          className="uppercase"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={validarCupom}
+                        disabled={!formData.cupom.trim() || validandoCupom}
+                        variant="outline"
+                      >
+                        {validandoCupom ? "Validando..." : "Aplicar"}
+                      </Button>
+                    </div>
+                    {cupomValido && (
+                      <p className="text-sm text-green-600 dark:text-green-400 mt-2">
+                        ✓ Cupom aplicado: {cupomValido.desconto_percentual}% de desconto
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
                     <CardTitle>Forma de Pagamento</CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -348,9 +465,17 @@ const Checkout = () => {
                         <span className="text-muted-foreground">Subtotal</span>
                         <span>{getPreco() || "Consulte"}</span>
                       </div>
-                      <div className="flex justify-between font-semibold">
+                      {cupomValido && (
+                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400">
+                          <span>Desconto ({cupomValido.desconto_percentual}%)</span>
+                          <span>- {formatarPreco((parsePreco(getPreco()) * cupomValido.desconto_percentual) / 100)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-semibold text-lg">
                         <span>Total</span>
-                        <span className="text-primary">{getPreco() || "Consulte"}</span>
+                        <span className="text-primary">
+                          {getPreco() ? formatarPreco(calcularValorFinal()) : "Consulte"}
+                        </span>
                       </div>
                     </div>
 
