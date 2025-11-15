@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { CourseCard } from "@/components/CourseCard"; // <-- ADICIONADO
 
 interface Curso {
   id: number;
@@ -41,31 +42,74 @@ interface Curso {
   ImagemCapa: string | null;
 }
 
+// Interface simplificada para o CourseCard
+interface CursoRelacionado {
+  id: number;
+  "Nome dos cursos": string | null;
+  Tipo: string | null;
+  Modalidade: string | null;
+  "Carga Horária": string | null;
+  "Preço Pix / Valor para Cadastro": string | null;
+  "Preço Cartão / Valor para Cadastro": string | null;
+  ImagemCapa: string | null;
+  Polo: string | null;
+}
+
 const CourseDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [curso, setCurso] = useState<Curso | null>(null);
+  const [cursosRelacionados, setCursosRelacionados] = useState<CursoRelacionado[]>([]); // <-- ADICIONADO
   const [loading, setLoading] = useState(true);
   const { trackCourseView, updateViewDuration } = useAnalytics();
   const startTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
+    // Reseta os estados ao mudar de ID
+    setCurso(null);
+    setCursosRelacionados([]);
+    setLoading(true);
+
     if (id) {
+      console.log(`LOG: Novo ID de curso detectado: ${id}. Buscando dados...`);
       fetchCurso();
-      // Rastrear visualização quando a página carrega
+      
       trackCourseView(parseInt(id), new URLSearchParams(window.location.search).get("origem") || "direto");
     }
 
     // Atualizar duração ao sair da página
-    return () => {
+    const handleUnload = () => {
       if (id) {
+        console.log("LOG: Usuário saindo da página. Registrando duração...");
         const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
         updateViewDuration(parseInt(id), duration);
       }
     };
-  }, [id]);
+    
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      console.log("LOG: Componente desmontando ou ID mudando. Registrando duração.");
+      if (id) {
+        const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        updateViewDuration(parseInt(id), duration);
+      }
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [id]); // Dependência principal no ID da URL
+
+  // Novo useEffect para buscar cursos relacionados QUANDO o curso principal for carregado
+  useEffect(() => {
+    if (curso && curso["Área de Atuação"]) {
+      console.log(`LOG: Curso principal carregado: ${curso["Nome dos cursos"]}. Buscando relacionados da área: ${curso["Área de Atuação"]}`);
+      fetchCursosRelacionados(curso["Área de Atuação"], curso.id);
+    } else if (curso) {
+      console.log("LOG: Curso principal não tem 'Área de Atuação', não é possível buscar relacionados.");
+    }
+  }, [curso]); // Dispara quando o 'curso' for definido
 
   const fetchCurso = async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from("cursos")
         .select("*")
@@ -79,6 +123,36 @@ const CourseDetail = () => {
       console.error(error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Nova função para buscar cursos relacionados
+  const fetchCursosRelacionados = async (area: string, cursoId: number) => {
+    try {
+      const { data, error } = await supabase
+        .from("cursos")
+        .select(`
+          id,
+          "Nome dos cursos",
+          Tipo,
+          Modalidade,
+          "Carga Horária",
+          "Preço Pix / Valor para Cadastro",
+          "Preço Cartão / Valor para Cadastro",
+          ImagemCapa,
+          Polo
+        `) // Seleciona apenas o necessário para o Card
+        .eq("Área de Atuação", area)
+        .neq("id", cursoId) // Exclui o curso que já estamos vendo
+        .limit(3); // Limita a 3 cursos
+
+      if (error) throw error;
+      
+      console.log(`LOG: Cursos relacionados encontrados: ${data?.length || 0}`);
+      setCursosRelacionados(data || []);
+    } catch (error: any) {
+      console.error("Erro ao buscar cursos relacionados:", error);
+      // Não usamos toast aqui para não poluir, já que é uma feature secundária
     }
   };
 
@@ -293,6 +367,25 @@ const CourseDetail = () => {
                 </Tabs>
               </CardContent>
             </Card>
+
+            {/* --- INÍCIO DA NOVA SEÇÃO DE CURSOS RELACIONADOS --- */}
+            {cursosRelacionados.length > 0 && (
+              <div className="pt-8">
+                <h2 className="text-2xl font-bold mb-6">Quem viu este, viu também</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {cursosRelacionados.map((cursoRelacionado) => (
+                    // O `cursoRelacionado` tem o tipo CursoRelacionado, que é
+                    // compatível com o que o CourseCard espera.
+                    <CourseCard 
+                      key={cursoRelacionado.id} 
+                      curso={cursoRelacionado as any} 
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* --- FIM DA NOVA SEÇÃO --- */}
+
           </div>
 
           {/* Sidebar - Preços e CTA */}
