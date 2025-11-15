@@ -10,6 +10,7 @@ import CourseDetail from "./pages/CourseDetail";
 import Checkout from "./pages/Checkout";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login"; // <-- ADICIONADO
 
 const queryClient = new QueryClient();
 
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/curso/:id" element={<CourseDetail />} />
           <Route path="/checkout/:id" element={<Checkout />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/login" element={<Login />} /> {/* <-- ADICIONADO */}
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

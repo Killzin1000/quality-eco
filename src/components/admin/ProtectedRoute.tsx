@@ -12,6 +12,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    console.log("LOG (ProtectedRoute): Iniciando verificação de acesso.");
     checkAdminAccess();
   }, []);
 
@@ -20,10 +21,13 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
+        console.log("LOG (ProtectedRoute): Usuário não logado. Redirecionando para /login.");
         toast.error("Você precisa estar logado para acessar o admin");
-        navigate("/");
+        navigate("/login"); // <-- AJUSTADO
         return;
       }
+
+      console.log(`LOG (ProtectedRoute): Usuário ${user.email} logado. Verificando permissão de 'admin'.`);
 
       // Verificar se o usuário tem role de admin
       const { data: userRoles, error } = await supabase
@@ -34,16 +38,18 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         .single();
 
       if (error || !userRoles) {
+        console.warn("LOG (ProtectedRoute): Acesso negado. Usuário não é 'admin'. Redirecionando.");
         toast.error("Acesso negado. Você não tem permissão de administrador.");
-        navigate("/");
+        navigate("/login"); // <-- AJUSTADO
         return;
       }
 
+      console.log("LOG (ProtectedRoute): Acesso de admin concedido.");
       setIsAdmin(true);
     } catch (error) {
       console.error("Erro ao verificar acesso admin:", error);
       toast.error("Erro ao verificar permissões");
-      navigate("/");
+      navigate("/login"); // <-- AJUSTADO
     }
   };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Navbar } from "@/components/Navbar";
@@ -47,22 +47,45 @@ const Checkout = () => {
     cupom: "",
   });
 
+  const formDataRef = useRef(formData);
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [cupomValido, setCupomValido] = useState<any>(null);
   const [validandoCupom, setValidandoCupom] = useState(false);
 
   useEffect(() => {
+    formDataRef.current = formData;
+    console.log("LOG: formDataRef atualizado. Nome:", formDataRef.current.nome, "Email:", formDataRef.current.email, "Telefone:", formDataRef.current.telefone);
+  }, [formData]);
+
+
+  useEffect(() => {
     if (id) {
       fetchCurso();
       
-      // Registrar abandono de carrinho após 30 segundos
+      console.log("LOG: Timer de 10s para abandono de carrinho iniciado."); // <-- AJUSTADO
+      
       const abandonTimer = setTimeout(() => {
-        if (formData.email || formData.telefone) {
-          registrarAbandonoCarrinho();
+        console.log("LOG: Timer de 10s disparado. Verificando dados no ref..."); // <-- AJUSTADO
+        
+        // O gatilho ainda é o contato (email ou telefone)
+        if (formDataRef.current.email || formDataRef.current.telefone) {
+          console.log("LOG: Email ou Telefone encontrado. Registrando abandono com nome...");
+          // Mas agora passamos o nome junto
+          registrarAbandonoCarrinho(
+            formDataRef.current.nome,
+            formDataRef.current.email, 
+            formDataRef.current.telefone
+          );
+        } else {
+           console.log("LOG: Nenhum email ou telefone preenchido no ref. Abandono não registrado.");
         }
-      }, 30000);
+      }, 10000); // <-- AJUSTADO PARA 10 SEGUNDOS
 
-      return () => clearTimeout(abandonTimer);
+      return () => {
+        console.log("LOG: Limpando timer de abandono (componente desmontou ou ID mudou).");
+        clearTimeout(abandonTimer);
+      }
     }
   }, [id]);
 
@@ -84,13 +107,17 @@ const Checkout = () => {
     }
   };
 
-  const registrarAbandonoCarrinho = async () => {
+  // Função atualizada para incluir o NOME
+  const registrarAbandonoCarrinho = async (nome: string, email: string, telefone: string) => {
     try {
+      console.log(`LOG: Enviando abandono para o Supabase: curso ${id}, nome: ${nome}, email: ${email}, tel: ${telefone}`);
       await supabase.from("carrinhos_abandonados").insert({
-        email: formData.email || null,
-        telefone: formData.telefone || null,
+        nome: nome || null, // <-- AJUSTADO
+        email: email || null,
+        telefone: telefone || null,
         curso_id: parseInt(id!),
       });
+      console.log("LOG: Registro de abandono salvo com sucesso.");
     } catch (error) {
       console.error("Erro ao registrar abandono:", error);
     }
@@ -113,7 +140,6 @@ const Checkout = () => {
 
   const parsePreco = (preco: string | null): number => {
     if (!preco) return 0;
-    // Remove "R$", espaços e converte vírgula para ponto
     const valorLimpo = preco.replace(/[R$\s]/g, "").replace(",", ".");
     return parseFloat(valorLimpo) || 0;
   };
@@ -156,14 +182,12 @@ const Checkout = () => {
         return;
       }
 
-      // Verificar se atingiu uso máximo
       if (data.uso_atual >= data.uso_maximo) {
         toast.error("Este cupom já atingiu o limite de usos");
         setCupomValido(null);
         return;
       }
 
-      // Verificar expiração
       if (data.data_expiracao && new Date(data.data_expiracao) < new Date()) {
         toast.error("Este cupom está expirado");
         setCupomValido(null);
@@ -186,14 +210,13 @@ const Checkout = () => {
     setErrors({});
 
     try {
-      // Validação
       checkoutSchema.parse(formData);
 
       setSubmitting(true);
+      console.log("LOG: Formulário válido, enviando matrícula...");
 
       const valorFinal = calcularValorFinal();
 
-      // Salvar matrícula
       const { error } = await supabase.from("matriculas").insert({
         curso_id: parseInt(id!),
         aluno_nome: formData.nome,
@@ -205,16 +228,17 @@ const Checkout = () => {
       });
 
       if (error) throw error;
+      console.log("LOG: Matrícula salva no Supabase.");
 
-      // Se usou cupom, atualizar contador de uso
       if (cupomValido) {
+        console.log("LOG: Atualizando contagem de uso do cupom.");
         await supabase
           .from("cupons")
           .update({ uso_atual: cupomValido.uso_atual + 1 })
           .eq("id", cupomValido.id);
 
-        // Marcar cupom como usado se for exit-intent
         if (cupomValido.tipo === "exit_intent") {
+          console.log("LOG: Marcando cupom de exit-intent como usado.");
           await supabase
             .from("leads_exit_intent")
             .update({ cupom_usado: true })
@@ -222,19 +246,18 @@ const Checkout = () => {
         }
       }
 
-      // Marcar conversão no analytics
       await markConversion();
       await trackEvent("matricula_concluida", "checkout_form", {
         curso_id: parseInt(id!),
         forma_pagamento: formData.formaPagamento,
         usou_cupom: !!cupomValido,
       });
+      console.log("LOG: Analytics de conversão marcado.");
 
       toast.success("Matrícula realizada com sucesso!", {
         description: "Você receberá um email com as instruções.",
       });
 
-      // Redirecionar após sucesso
       setTimeout(() => {
         navigate("/");
       }, 2000);
@@ -248,9 +271,10 @@ const Checkout = () => {
         });
         setErrors(fieldErrors);
         toast.error("Por favor, corrija os erros no formulário");
+        console.warn("LOG: Erro de validação do Zod:", fieldErrors);
       } else {
         toast.error("Erro ao processar matrícula");
-        console.error(error);
+        console.error("Erro ao processar matrícula:", error);
       }
     } finally {
       setSubmitting(false);
