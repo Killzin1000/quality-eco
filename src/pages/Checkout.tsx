@@ -13,6 +13,7 @@ import { Shield, CreditCard, Smartphone, Barcode } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { ExitIntentModal } from "@/components/ExitIntentModal"; // <-- ADICIONADO
 
 const checkoutSchema = z.object({
   nome: z.string().trim().min(3, "Nome deve ter pelo menos 3 caracteres").max(100, "Nome muito longo"),
@@ -63,15 +64,13 @@ const Checkout = () => {
     if (id) {
       fetchCurso();
       
-      console.log("LOG: Timer de 10s para abandono de carrinho iniciado."); // <-- AJUSTADO
+      console.log("LOG: Timer de 10s para abandono de carrinho iniciado.");
       
       const abandonTimer = setTimeout(() => {
-        console.log("LOG: Timer de 10s disparado. Verificando dados no ref..."); // <-- AJUSTADO
+        console.log("LOG: Timer de 10s disparado. Verificando dados no ref...");
         
-        // O gatilho ainda é o contato (email ou telefone)
         if (formDataRef.current.email || formDataRef.current.telefone) {
           console.log("LOG: Email ou Telefone encontrado. Registrando abandono com nome...");
-          // Mas agora passamos o nome junto
           registrarAbandonoCarrinho(
             formDataRef.current.nome,
             formDataRef.current.email, 
@@ -80,7 +79,7 @@ const Checkout = () => {
         } else {
            console.log("LOG: Nenhum email ou telefone preenchido no ref. Abandono não registrado.");
         }
-      }, 10000); // <-- AJUSTADO PARA 10 SEGUNDOS
+      }, 10000);
 
       return () => {
         console.log("LOG: Limpando timer de abandono (componente desmontou ou ID mudou).");
@@ -107,12 +106,11 @@ const Checkout = () => {
     }
   };
 
-  // Função atualizada para incluir o NOME
   const registrarAbandonoCarrinho = async (nome: string, email: string, telefone: string) => {
     try {
       console.log(`LOG: Enviando abandono para o Supabase: curso ${id}, nome: ${nome}, email: ${email}, tel: ${telefone}`);
       await supabase.from("carrinhos_abandonados").insert({
-        nome: nome || null, // <-- AJUSTADO
+        nome: nome || null,
         email: email || null,
         telefone: telefone || null,
         curso_id: parseInt(id!),
@@ -310,6 +308,9 @@ const Checkout = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Passamos o nome do curso para o modal de saída */}
+      <ExitIntentModal courseName={curso["Nome dos cursos"] || undefined} />
+      
       <Navbar />
 
       <main className="container mx-auto px-4 py-8 flex-1">

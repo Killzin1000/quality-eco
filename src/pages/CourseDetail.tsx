@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAnalytics } from "@/hooks/useAnalytics";
-import { CourseCard } from "@/components/CourseCard"; // <-- ADICIONADO
+import { CourseCard } from "@/components/CourseCard";
+import { ExitIntentModal } from "@/components/ExitIntentModal"; // <-- ADICIONADO
 
 interface Curso {
   id: number;
@@ -42,7 +43,6 @@ interface Curso {
   ImagemCapa: string | null;
 }
 
-// Interface simplificada para o CourseCard
 interface CursoRelacionado {
   id: number;
   "Nome dos cursos": string | null;
@@ -58,13 +58,12 @@ interface CursoRelacionado {
 const CourseDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [curso, setCurso] = useState<Curso | null>(null);
-  const [cursosRelacionados, setCursosRelacionados] = useState<CursoRelacionado[]>([]); // <-- ADICIONADO
+  const [cursosRelacionados, setCursosRelacionados] = useState<CursoRelacionado[]>([]);
   const [loading, setLoading] = useState(true);
   const { trackCourseView, updateViewDuration } = useAnalytics();
   const startTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    // Reseta os estados ao mudar de ID
     setCurso(null);
     setCursosRelacionados([]);
     setLoading(true);
@@ -76,7 +75,6 @@ const CourseDetail = () => {
       trackCourseView(parseInt(id), new URLSearchParams(window.location.search).get("origem") || "direto");
     }
 
-    // Atualizar duração ao sair da página
     const handleUnload = () => {
       if (id) {
         console.log("LOG: Usuário saindo da página. Registrando duração...");
@@ -95,9 +93,8 @@ const CourseDetail = () => {
       }
       window.removeEventListener('beforeunload', handleUnload);
     };
-  }, [id]); // Dependência principal no ID da URL
+  }, [id]);
 
-  // Novo useEffect para buscar cursos relacionados QUANDO o curso principal for carregado
   useEffect(() => {
     if (curso && curso["Área de Atuação"]) {
       console.log(`LOG: Curso principal carregado: ${curso["Nome dos cursos"]}. Buscando relacionados da área: ${curso["Área de Atuação"]}`);
@@ -105,7 +102,7 @@ const CourseDetail = () => {
     } else if (curso) {
       console.log("LOG: Curso principal não tem 'Área de Atuação', não é possível buscar relacionados.");
     }
-  }, [curso]); // Dispara quando o 'curso' for definido
+  }, [curso]);
 
   const fetchCurso = async () => {
     try {
@@ -126,7 +123,6 @@ const CourseDetail = () => {
     }
   };
 
-  // Nova função para buscar cursos relacionados
   const fetchCursosRelacionados = async (area: string, cursoId: number) => {
     try {
       const { data, error } = await supabase
@@ -141,10 +137,10 @@ const CourseDetail = () => {
           "Preço Cartão / Valor para Cadastro",
           ImagemCapa,
           Polo
-        `) // Seleciona apenas o necessário para o Card
+        `)
         .eq("Área de Atuação", area)
-        .neq("id", cursoId) // Exclui o curso que já estamos vendo
-        .limit(3); // Limita a 3 cursos
+        .neq("id", cursoId)
+        .limit(3);
 
       if (error) throw error;
       
@@ -152,7 +148,6 @@ const CourseDetail = () => {
       setCursosRelacionados(data || []);
     } catch (error: any) {
       console.error("Erro ao buscar cursos relacionados:", error);
-      // Não usamos toast aqui para não poluir, já que é uma feature secundária
     }
   };
 
@@ -187,6 +182,9 @@ const CourseDetail = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Passamos o nome do curso para o modal de saída */}
+      <ExitIntentModal courseName={curso["Nome dos cursos"] || undefined} />
+      
       <Navbar />
 
       <main className="container mx-auto px-4 py-8 flex-1">
@@ -368,14 +366,11 @@ const CourseDetail = () => {
               </CardContent>
             </Card>
 
-            {/* --- INÍCIO DA NOVA SEÇÃO DE CURSOS RELACIONADOS --- */}
             {cursosRelacionados.length > 0 && (
               <div className="pt-8">
                 <h2 className="text-2xl font-bold mb-6">Quem viu este, viu também</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {cursosRelacionados.map((cursoRelacionado) => (
-                    // O `cursoRelacionado` tem o tipo CursoRelacionado, que é
-                    // compatível com o que o CourseCard espera.
                     <CourseCard 
                       key={cursoRelacionado.id} 
                       curso={cursoRelacionado as any} 
@@ -384,7 +379,6 @@ const CourseDetail = () => {
                 </div>
               </div>
             )}
-            {/* --- FIM DA NOVA SEÇÃO --- */}
 
           </div>
 

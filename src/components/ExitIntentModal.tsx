@@ -13,7 +13,12 @@ const exitIntentSchema = z.object({
   telefone: z.string().trim().min(10, "Telefone inválido").max(20),
 });
 
-export const ExitIntentModal = () => {
+// 1. Adicionamos a prop 'courseName'
+interface ExitIntentModalProps {
+  courseName?: string;
+}
+
+export const ExitIntentModal = ({ courseName }: ExitIntentModalProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [hasShown, setHasShown] = useState(false);
   const [cupomCode, setCupomCode] = useState("");
@@ -26,16 +31,23 @@ export const ExitIntentModal = () => {
   });
 
   useEffect(() => {
-    // Verificar se já mostrou o modal nesta sessão
+    // 2. Se não recebemos um nome de curso, o modal não faz nada.
+    if (!courseName) {
+      console.log("LOG (ExitIntent): Sem nome de curso, modal desativado.");
+      return;
+    }
+
     const shown = sessionStorage.getItem("exitIntentShown");
     if (shown) {
+      console.log("LOG (ExitIntent): Modal já foi exibido nesta sessão.");
       setHasShown(true);
       return;
     }
 
     const handleMouseLeave = (e: MouseEvent) => {
-      // Detectar quando o mouse sai pela parte superior da janela
-      if (e.clientY <= 0 && !hasShown && !isOpen) {
+      // 3. A lógica agora verifica se 'courseName' existe E se o modal já não foi mostrado
+      if (e.clientY <= 0 && !hasShown && !isOpen && courseName) {
+        console.log(`LOG (ExitIntent): Intenção de saída detectada para o curso: ${courseName}`);
         setIsOpen(true);
         setHasShown(true);
         sessionStorage.setItem("exitIntentShown", "true");
@@ -47,7 +59,7 @@ export const ExitIntentModal = () => {
     return () => {
       document.removeEventListener("mouseleave", handleMouseLeave);
     };
-  }, [hasShown, isOpen]);
+  }, [hasShown, isOpen, courseName]); // 4. Adicionamos courseName às dependências
 
   const generateUniqueCouponCode = () => {
     const timestamp = Date.now().toString(36);
@@ -61,11 +73,10 @@ export const ExitIntentModal = () => {
     try {
       exitIntentSchema.parse(formData);
       setSubmitting(true);
+      console.log("LOG (ExitIntent): Enviando lead...");
 
-      // Gerar código único para o cupom
       const novoCodigo = generateUniqueCouponCode();
 
-      // Criar cupom individual para este lead
       const { error: cupomError } = await supabase
         .from("cupons")
         .insert({
@@ -78,13 +89,13 @@ export const ExitIntentModal = () => {
 
       if (cupomError) throw cupomError;
 
-      // Salvar lead
       const { error: leadError } = await supabase
         .from("leads_exit_intent")
         .insert({
           nome: formData.nome,
           telefone: formData.telefone,
           cupom_codigo: novoCodigo,
+          // (Opcional) Poderíamos salvar o nome do curso aqui também
         });
 
       if (leadError) throw leadError;
@@ -122,8 +133,10 @@ export const ExitIntentModal = () => {
                 Espere! Não vá embora ainda 🎁
               </DialogTitle>
               <DialogDescription className="text-center text-base">
-                Deixe seu contato e ganhe um cupom de{" "}
-                <span className="font-bold text-accent">50% de desconto</span> em qualquer curso!
+                Vimos que você se interessou pelo curso: <br />
+                <strong className="text-foreground">{courseName}</strong>
+                <br />
+                Deixe seu contato e ganhe <span className="font-bold text-accent">50% de desconto</span>!
               </DialogDescription>
             </DialogHeader>
 
@@ -199,7 +212,7 @@ export const ExitIntentModal = () => {
                   Use este cupom no checkout para obter <span className="font-bold text-accent">50% de desconto</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Válido para qualquer curso • Uso único
+                  Válido para o curso {courseName} • Uso único
                 </p>
               </div>
 
@@ -207,7 +220,7 @@ export const ExitIntentModal = () => {
                 onClick={() => setIsOpen(false)}
                 className="w-full bg-accent hover:bg-accent-light text-accent-foreground"
               >
-                Começar a explorar cursos
+                Continuar no site
               </Button>
             </div>
           </>

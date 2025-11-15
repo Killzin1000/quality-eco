@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, GraduationCap, Monitor, Users, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
+import { useSearch } from "@/SearchProvider"; // <-- CORRIGIDO AQUI (removido o /context)
 
 interface Curso {
   id: number;
@@ -25,13 +26,14 @@ interface Curso {
 const Home = () => {
   const [cursos, setCursos] = useState<Curso[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const { setOpenSearch } = useSearch();
 
   useEffect(() => {
     fetchCursos();
   }, []);
 
   const fetchCursos = async () => {
+    console.log("LOG (Home): Buscando cursos em destaque...");
     try {
       const { data, error } = await supabase
         .from("cursos")
@@ -45,12 +47,6 @@ const Home = () => {
       console.error(error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSearch = () => {
-    if (searchQuery.trim()) {
-      window.location.href = `/cursos?search=${encodeURIComponent(searchQuery)}`;
     }
   };
 
@@ -71,27 +67,37 @@ const Home = () => {
               Cursos superiores EaD e presenciais reconhecidos pelo MEC
             </p>
             
-            {/* Search Bar */}
+            {/* Search Bar (gatilho) */}
             <div className="flex gap-2 max-w-2xl mx-auto">
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   type="search"
                   placeholder="Buscar por curso ou área..."
-                  className="pl-12 h-14 text-lg bg-background/95 backdrop-blur"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSearch()}
+                  className="pl-12 h-14 text-lg bg-background/95 backdrop-blur cursor-pointer"
+                  onFocus={() => {
+                    console.log("LOG (Home): Foco no input do Hero, abrindo busca.");
+                    setOpenSearch(true);
+                  }}
+                  onClick={() => {
+                    console.log("LOG (Home): Clique no input do Hero, abrindo busca.");
+                    setOpenSearch(true);
+                  }}
+                  readOnly
                 />
               </div>
               <Button 
                 size="lg" 
                 className="h-14 px-8 bg-accent hover:bg-accent-light text-accent-foreground font-semibold"
-                onClick={handleSearch}
+                onClick={() => {
+                  console.log("LOG (Home): Botão 'Buscar' do Hero clicado, abrindo busca.");
+                  setOpenSearch(true);
+                }}
               >
                 Buscar
               </Button>
             </div>
+
 
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
