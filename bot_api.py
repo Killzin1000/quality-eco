@@ -88,6 +88,7 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 - Se o dado diz "Prazo de Conclusão: Mínimo 6", você DEVE dizer que são **6 meses**.
 - NÃO use a "Carga Horária" para chutar a duração em meses. Use o campo "Tempo de Conclusão".
 - Se você não sabe uma informação, diga que vai verificar com a secretaria, NÃO INVENTE.
+- Se for buscar um curso, sua resposta de usuário deve ser neutra (ex: "Vou verificar...") e a tag `[CURSO_BUSCA] NOME DO CURSO` deve vir DEPOIS, em uma nova linha.
 ---
 """
 
@@ -210,11 +211,10 @@ def buscar_cursos_relevantes(termo_busca_ia: str, area_preferencial: str = None)
         print(f"LOG (Python) ERRO SUPABASE: {e}")
         return []
 
-# --- CORREÇÃO AQUI: Adicionado parâmetro 'completo' ---
 def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Optional[Dict]:
     global supabase
     try:
-        print(f"LOG (Python): Buscando curso por nome exato: '{nome_curso}' (Completo={completo})")
+        print(f"LOG (Python): Buscando ID para o nome exato: '{nome_curso}' (Completo={completo})")
         if completo:
             select_cols = (
                 "id, \"Nome dos cursos\", \"Tipo\", \"Modalidade\", \"Carga Horária\", "
@@ -224,7 +224,7 @@ def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Opti
                 "\"Link e-MEC Curso\", \"Polo\", \"Observações\", \"Ementa\""
             )
         else:
-            select_cols = "id" # Para navegação, só precisamos do ID
+            select_cols = "id"
 
         response = supabase.table("cursos").select(select_cols).eq('"Nome dos cursos"', nome_curso).limit(1).single().execute()
         if response.data:
@@ -309,7 +309,6 @@ def atualizar_dados_cliente(session: ChatSession, mensagem_usuario: str, histori
             if nome.lower() not in ["formado", "licenciado", "graduado", "bacharel", "tecnólogo"]:
                 session.nome_cliente = nome
                 etiqueta_atualizada = True
-        
         elif "seu nome?" in last_bot_msg and len(mensagem_usuario.split()) <= 3:
              nome_extraido = mensagem_usuario.strip().title()
              if nome_extraido.lower() not in ["olá", "oi", "sou", "tenho", "formado", "bacharel", "licenciado", "tecnólogo", "tudo", "bom", "claro", "sim"]:
@@ -360,7 +359,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     global PROMPTS_CARREGADOS, model, configuracao_geracao
     
     navegar_para_link = None
-    dados_do_contexto = None
+    dados_do_contexto = None 
     
     if not PROMPTS_CARREGADOS:
         print("LOG (Python): Prompts não carregados. Tentando carregar agora...")
@@ -374,7 +373,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     
     if session.curso_contexto:
         print(f"LOG (Python): Contexto ativo: {session.curso_contexto}. Atualizando dados para o prompt...")
-        # --- CORREÇÃO: Chama com completo=True explicitamente ---
+        # Chama com completo=True explicitamente
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
         if curso_obj:
             _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, session.nome_cliente)
@@ -386,8 +385,9 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
         atualizar_dados_cliente(session, mensagem, historico_recente_bot)
         session.historico.append(ChatMessage(role="user", content=mensagem))
     
-    nome_cliente_local = session.nome_cliente
-    
+    # --- CORREÇÃO: Definição da variável 'nome_cliente_local' ---
+    nome_cliente_local = session.nome_cliente # <--- ADICIONADA AQUI
+
     perfil_cliente_prompt = f"""
 ---
 🧠 **PERFIL DO CLIENTE (Etiquetas Obrigatórias)**
@@ -423,15 +423,10 @@ Nova mensagem do usuário: "{mensagem}"
 """
 
     try:
-        if not model:
-             raise Exception("Cliente Gemini não foi inicializado.")
+        if not model: raise Exception("Cliente Gemini não foi inicializado.")
              
         print(f"LOG (Python): Gerando conteúdo no Gemini para: {mensagem}")
-        
-        interpretacao = model.generate_content(
-            prompt_final,
-            generation_config=configuracao_geracao
-        )
+        interpretacao = model.generate_content(prompt_final, generation_config=configuracao_geracao)
         resposta_bruta = interpretacao.text.strip()
         
         if "PERFIL DO CLIENTE" in resposta_bruta:
@@ -439,7 +434,6 @@ Nova mensagem do usuário: "{mensagem}"
         else:
             resposta_ia_conversacional = resposta_bruta
         
-        # --- LÓGICA DE NAVEGAÇÃO E BUSCA ---
         match_nav = re.search(r"\[NAVEGAR_PARA\]", resposta_bruta, re.IGNORECASE)
         match_busca = re.search(r"\[CURSO_BUSCA\]\s*(.*)\b([a-zA-Z\s\-áéíóúâêôãõç]{5,}[a-zA-Záéíóúâêôãõç])\s*$", resposta_bruta, re.IGNORECASE | re.DOTALL)
 
@@ -481,6 +475,7 @@ Nova mensagem do usuário: "{mensagem}"
             if len(cursos_encontrados_raw) == 1:
                 print("LOG (Python): 1 curso encontrado.")
                 curso = cursos_encontrados_raw[0]
+                # Usa nome_cliente_local aqui
                 gancho, dados_ocultos, pergunta = montar_resposta_dividida(curso, nome_cliente_local, resumido=False)
                 session.historico.append(ChatMessage(role="assistant", content=dados_ocultos))
                 resposta_final = f"{resposta_ia_conversacional}\n\n{gancho}\n\n{pergunta}"
@@ -490,6 +485,7 @@ Nova mensagem do usuário: "{mensagem}"
             if len(cursos_encontrados_raw) > 1:
                 print(f"LOG (Python): {len(cursos_encontrados_raw)} cursos encontrados.")
                 for curso in cursos_encontrados_raw:
+                    # Usa nome_cliente_local aqui
                     gancho, dados_ocultos = montar_resposta_dividida(curso, nome_cliente_local, resumido=True)
                     session.historico.append(ChatMessage(role="assistant", content=dados_ocultos))
                 
@@ -532,7 +528,7 @@ async def refresh_prompts():
     else: raise HTTPException(status_code=500, detail="Falha ao recarregar prompts.")
 
 @app.get("/")
-def root(): return {"status": "API do Bot ESP (v4.2 - Argument Fix) está online!"}
+def root(): return {"status": "API do Bot ESP (v5.3 - Name Fix) está online!"}
 
 if __name__ == "__main__":
     carregar_prompts_do_supabase()

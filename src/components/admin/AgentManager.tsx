@@ -4,44 +4,43 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
+import { Switch } from "@/components/ui/switch"; 
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Save, Edit2, Plus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils"; // <--- O ERRO ESTAVA AQUI (Faltava essa linha)
 
-// 1. Define o schema de validação do formulário
 const promptSchema = z.object({
   id: z.string().uuid().optional().nullable(),
-  nome_chave: z.string().trim().min(3, "A chave deve ter pelo menos 3 caracteres.")
-    .regex(/^[a-z0-9_]+$/, "A chave deve conter apenas letras minúsculas, números e underscore (ex: 'persona_bot')."),
-  titulo: z.string().trim().min(5, "O título deve ter pelo menos 5 caracteres."),
-  conteudo: z.string().trim().min(10, "O conteúdo do prompt é obrigatório."),
+  nome_chave: z.string().trim().min(3, "Chave obrigatória (ex: 'persona')."),
+  titulo: z.string().trim().min(5, "Título obrigatório."),
+  conteudo: z.string().trim().min(10, "Conteúdo obrigatório."),
+  ordem: z.coerce.number().min(0, "A ordem deve ser um número positivo."),
+  ativo: z.boolean().default(true),
 });
 
 type PromptFormValues = z.infer<typeof promptSchema>;
 
-// Define o tipo que vem do Supabase (para a lista)
 type AgentPrompt = {
   id: string;
   nome_chave: string;
   titulo: string;
   conteudo: string | null;
-  created_at?: string;
+  ordem: number;
+  ativo: boolean;
 };
 
 export const AgentManager = () => {
   const [prompts, setPrompts] = useState<AgentPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  
-  // ID do prompt que está sendo editado (ou null para "novo prompt")
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // 2. Configuração do formulário
   const form = useForm<PromptFormValues>({
     resolver: zodResolver(promptSchema),
     defaultValues: {
@@ -49,74 +48,68 @@ export const AgentManager = () => {
       nome_chave: "",
       titulo: "",
       conteudo: "",
+      ordem: 10, 
+      ativo: true,
     },
   });
 
-  // 3. Função para buscar os prompts do Supabase
   const fetchPrompts = async () => {
-    console.log("LOG (AgentManager): Buscando prompts do Supabase...");
     try {
       setLoading(true);
       const { data, error } = await supabase
         .from("agent_prompts")
         .select("*")
-        .order("titulo", { ascending: true });
+        .order("ordem", { ascending: true });
       
       if (error) throw error;
       setPrompts(data || []);
-      console.log(`LOG (AgentManager): ${data?.length || 0} prompts carregados.`);
     } catch (error: any) {
-      toast.error("Erro ao carregar prompts da IA.");
+      toast.error("Erro ao carregar prompts.");
       console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  // 4. Busca os prompts ao carregar a tela
   useEffect(() => {
     fetchPrompts();
   }, []);
 
-  // 5. Função para Salvar (Criar ou Atualizar)
   const onSubmit = async (values: PromptFormValues) => {
-    console.log("LOG (AgentManager): Salvando prompt...", values);
     setIsSaving(true);
-    
-    // 'upsert' é perfeito: cria se não existe, atualiza se existe
     const { error } = await supabase.from("agent_prompts").upsert({
-      id: values.id || undefined, // Se 'id' for null/undefined, o Supabase cria um novo
+      id: values.id || undefined,
       nome_chave: values.nome_chave,
       titulo: values.titulo,
       conteudo: values.conteudo,
+      ordem: values.ordem,
+      ativo: values.ativo,
     });
 
     setIsSaving(false);
 
     if (error) {
-      toast.error("Erro ao salvar prompt.", { description: error.message });
-      console.error("Erro ao salvar:", error);
+      toast.error("Erro ao salvar.", { description: error.message });
     } else {
       toast.success(values.id ? "Prompt atualizado!" : "Novo prompt criado!");
       resetForm();
-      fetchPrompts(); // Recarrega a lista
+      fetchPrompts();
     }
   };
 
-  // 6. Função para carregar um prompt no formulário de edição
   const handleEdit = (prompt: AgentPrompt) => {
-    console.log(`LOG (AgentManager): Editando prompt: ${prompt.titulo}`);
     setEditingId(prompt.id);
     form.reset({
       id: prompt.id,
       nome_chave: prompt.nome_chave,
       titulo: prompt.titulo,
       conteudo: prompt.conteudo || "",
+      ordem: prompt.ordem,
+      ativo: prompt.ativo,
     });
-    window.scrollTo(0, 0); // Rola para o topo (onde está o form)
+    window.scrollTo(0, 0);
   };
 
-  // 7. Função para limpar o formulário
   const resetForm = () => {
     setEditingId(null);
     form.reset({
@@ -124,27 +117,26 @@ export const AgentManager = () => {
       nome_chave: "",
       titulo: "",
       conteudo: "",
+      ordem: 10,
+      ativo: true,
     });
   };
 
   return (
     <div className="space-y-8">
-      {/* Formulário de Criação/Edição */}
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-              <CardTitle>{editingId ? "Editando Prompt" : "Criar Novo Prompt"}</CardTitle>
+              <CardTitle>{editingId ? "Editando Módulo" : "Criar Novo Módulo de IA"}</CardTitle>
               <CardDescription>
-                {editingId 
-                  ? "Ajuste o conteúdo do prompt e salve." 
-                  : "Crie um novo módulo de prompt para a IA."}
+                Defina as regras, a ordem de prioridade e o conteúdo.
               </CardDescription>
             </div>
             {editingId && (
               <Button variant="outline" size="sm" onClick={resetForm}>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Novo
+                Cancelar Edição
               </Button>
             )}
           </div>
@@ -152,15 +144,16 @@ export const AgentManager = () => {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
                   name="titulo"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Título (Amigável)</FormLabel>
+                    <FormItem className="md:col-span-2">
+                      <FormLabel>Título (Identificação)</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 1. Tom de Voz e Persona" {...field} />
+                        <Input placeholder="Ex: Regras de Cancelamento" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -168,18 +161,49 @@ export const AgentManager = () => {
                 />
                 <FormField
                   control={form.control}
+                  name="ordem"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ordem (Prioridade)</FormLabel>
+                      <FormControl>
+                        <Input type="number" {...field} />
+                      </FormControl>
+                      <FormDescription>Menor número aparece primeiro.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
                   name="nome_chave"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Chave (ID do Sistema)</FormLabel>
+                      <FormLabel>Chave Única (ID)</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="Ex: persona_bot" 
-                          {...field} 
-                          disabled={!!editingId} // Não pode mudar a chave depois de criada
-                        />
+                        <Input placeholder="Ex: politica_cancelamento" {...field} />
                       </FormControl>
                       <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="ativo"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col gap-2 mt-2">
+                       <FormLabel>Status do Módulo</FormLabel>
+                       <div className="flex items-center space-x-2">
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <span>{field.value ? "Ativo (IA vai ler)" : "Inativo (IA ignora)"}</span>
+                       </div>
                     </FormItem>
                   )}
                 />
@@ -193,10 +217,10 @@ export const AgentManager = () => {
                     <FormLabel>Conteúdo do Prompt</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Você é um assistente virtual..."
+                        placeholder="Digite as instruções para a IA aqui..."
                         {...field}
                         rows={10}
-                        className="min-h-[200px]"
+                        className="font-mono text-sm"
                       />
                     </FormControl>
                     <FormMessage />
@@ -206,48 +230,47 @@ export const AgentManager = () => {
               
               <Button type="submit" disabled={isSaving}>
                 <Save className="mr-2 h-4 w-4" />
-                {isSaving ? (editingId ? "Salvando..." : "Criando...") : (editingId ? "Salvar Alterações" : "Criar Prompt")}
+                {isSaving ? "Salvando..." : "Salvar Módulo"}
               </Button>
             </form>
           </Form>
         </CardContent>
       </Card>
 
-      {/* Lista de Prompts Existentes */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Prompts Salvos</CardTitle>
-          <CardDescription>Estes são os módulos de prompt que o bot está usando.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {loading && (
-            <div className="space-y-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          )}
-          {!loading && prompts.length === 0 && (
-            <p className="text-center text-muted-foreground">Nenhum prompt encontrado.</p>
-          )}
-          {!loading && prompts.map((prompt) => (
-            <div 
-              key={prompt.id} 
-              className="flex items-center justify-between rounded-lg border p-4"
-            >
+      <div className="grid gap-4">
+        <h3 className="text-lg font-semibold">Módulos Ativos (Ordem de Leitura)</h3>
+        {loading && <Skeleton className="h-12 w-full" />}
+        {!loading && prompts.length === 0 && (
+          <p className="text-center text-muted-foreground">Nenhum prompt encontrado.</p>
+        )}
+        {!loading && prompts.map((prompt) => (
+          <div 
+            key={prompt.id} 
+            className={cn(
+              "flex items-center justify-between rounded-lg border p-4 transition-all",
+              !prompt.ativo && "opacity-50 bg-muted"
+            )}
+          >
+            <div className="flex items-center gap-4">
+              <Badge variant="outline" className="w-8 h-8 rounded-full flex items-center justify-center text-base">
+                {prompt.ordem}
+              </Badge>
               <div>
-                <p className="font-semibold">{prompt.titulo}</p>
-                <p className="text-sm text-muted-foreground">
-                  Chave: <code className="bg-muted px-1 rounded-sm">{prompt.nome_chave}</code>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold">{prompt.titulo}</p>
+                  {!prompt.ativo && <Badge variant="destructive" className="text-xs">Inativo</Badge>}
+                </div>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {prompt.nome_chave}
                 </p>
               </div>
-              <Button variant="outline" size="icon" onClick={() => handleEdit(prompt)}>
-                <Edit2 className="h-4 w-4" />
-                <span className="sr-only">Editar</span>
-              </Button>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+            <Button variant="ghost" size="icon" onClick={() => handleEdit(prompt)}>
+              <Edit2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
