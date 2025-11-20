@@ -465,7 +465,9 @@ const CourseDetail = () => {
       </main>
 
       <Footer />
-      <WhatsAppButton />
+      <WhatsAppButton 
+        courseContext={curso ? { id: curso.id, nome: curso["Nome dos cursos"] } : undefined} 
+      />
     </div>
   );
 };

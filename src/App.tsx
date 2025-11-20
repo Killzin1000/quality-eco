@@ -10,7 +10,8 @@ import Checkout from "./pages/Checkout";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
-import { SearchProvider } from "@/SearchProvider"; // <-- CORRIGIDO AQUI (removido o /context)
+import { SearchProvider } from "@/SearchProvider"; 
+import { ChatProvider } from "@/ChatProvider"; // <-- CORRIGIDO AQUI (removido o /context)
 
 const queryClient = new QueryClient();
 
@@ -19,20 +20,21 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <SearchProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/cursos" element={<Courses />} />
-            <Route path="/curso/:id" element={<CourseDetail />} />
-            <Route path="/checkout/:id" element={<Checkout />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="/login" element={<Login />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </SearchProvider>
+      <BrowserRouter>
+        <SearchProvider>
+          <ChatProvider>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/cursos" element={<Courses />} />
+              <Route path="/curso/:id" element={<CourseDetail />} />
+              <Route path="/checkout/:id" element={<Checkout />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ChatProvider>
+        </SearchProvider>
+      </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );

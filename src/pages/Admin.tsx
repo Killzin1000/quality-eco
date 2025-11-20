@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, Plus, BarChart3, Calendar as CalendarIcon } from "lucide-react";
+import { Pencil, Trash2, Plus, BarChart3, Calendar as CalendarIcon, Bot } from "lucide-react"; // 1. Importa o ícone 'Bot'
 import { toast } from "sonner";
 import { ProtectedRoute } from "@/components/admin/ProtectedRoute";
 import { DashboardStats } from "@/components/admin/DashboardStats";
@@ -20,23 +20,21 @@ import { ptBR } from "date-fns/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
+import { AgentManager } from "@/components/admin/AgentManager"; // 2. Importa o novo componente
 
 const Admin = () => {
   const [cursos, setCursos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // State para o seletor de data
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: subDays(new Date(), 29), // Padrão: últimos 30 dias
+    from: subDays(new Date(), 29),
     to: new Date(),
   });
   
-  // State que de fato aciona o filtro
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(
     dateRange
   );
 
-  // Estados para analytics
   const [stats, setStats] = useState({
     totalVisualizacoes: 0,
     visitantesUnicos: 0,
@@ -49,7 +47,6 @@ const Admin = () => {
   const [carrinhosAbandonados, setCarrinhosAbandonados] = useState<any[]>([]);
   const [leadsExitIntent, setLeadsExitIntent] = useState<any[]>([]);
 
-  // Atualiza os dados quando o 'filterDateRange' for alterado
   useEffect(() => {
     console.log("LOG: Mudança no filterDateRange detectada. Buscando dados...");
     fetchCursos();
@@ -71,13 +68,13 @@ const Admin = () => {
       return;
     }
 
-    // Definir datas de início e fim (garantindo que o 'to' vá até o fim do dia)
     const fromDate = filterDateRange.from;
     const toDate = filterDateRange.to ? endOfDay(filterDateRange.to) : endOfDay(new Date());
 
     console.log(`LOG: Buscando dados de ${fromDate.toISOString()} até ${toDate.toISOString()}`);
 
     try {
+      // ... (toda a lógica de fetchAnalytics continua a mesma) ...
       // Buscar estatísticas gerais
       const { data: visualizacoes } = await supabase
         .from("curso_visualizacoes")
@@ -122,7 +119,6 @@ const Admin = () => {
         carrinhoAbandonado: carrinhos?.length || 0,
       });
 
-      // Buscar top cursos - com filtro de data
       const { data: cursosList } = await supabase.from("cursos").select("id, \"Nome dos cursos\"");
       
       const { data: todasVisualizacoes } = await supabase
@@ -165,7 +161,6 @@ const Admin = () => {
 
       setTopCursos(estatisticasOrdenadas);
 
-      // Buscar carrinhos abandonados com nome do curso
       const { data: carrinhosData } = await supabase
         .from("carrinhos_abandonados")
         .select("*")
@@ -191,7 +186,6 @@ const Admin = () => {
 
       setCarrinhosAbandonados(carrinhosComCursos);
 
-      // Buscar leads exit-intent
       const { data: leads } = await supabase
         .from("leads_exit_intent")
         .select("*")
@@ -210,7 +204,6 @@ const Admin = () => {
   };
 
   const fetchCursos = async () => {
-    // Esta função não precisa de filtro de data, mas mantemos o log
     console.log("LOG: Buscando lista de cursos (para a aba 'Cursos')...");
     try {
       const { data, error } = await supabase
@@ -240,11 +233,10 @@ const Admin = () => {
               <div>
                 <h1 className="text-3xl font-bold mb-2">Painel Administrativo</h1>
                 <p className="text-muted-foreground">
-                  Gerencie cursos e acompanhe métricas de engajamento
+                  Gerencie cursos, prompts e acompanhe métricas de engajamento
                 </p>
               </div>
               
-              {/* --- FILTRO DE DATA --- */}
               <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -293,17 +285,22 @@ const Admin = () => {
                   Novo Curso
                 </Button>
               </div>
-              {/* --- FIM FILTRO DE DATA --- */}
 
             </div>
 
             <Tabs defaultValue="analytics" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-2 lg:w-auto">
+              {/* 3. Ajusta o grid para 3 colunas */}
+              <TabsList className="grid w-full grid-cols-3 lg:w-auto">
                 <TabsTrigger value="analytics" className="gap-2">
                   <BarChart3 className="h-4 w-4" />
                   Analytics
                 </TabsTrigger>
                 <TabsTrigger value="cursos">Cursos</TabsTrigger>
+                {/* 4. Adiciona a nova aba */}
+                <TabsTrigger value="agente" className="gap-2">
+                  <Bot className="h-4 w-4" />
+                  Agente IA
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="analytics" className="space-y-6">
@@ -314,19 +311,16 @@ const Admin = () => {
                 ) : (
                   <>
                     <DashboardStats {...stats} />
-
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <TopCourses cursos={topCursos} />
                       <AbandonedCarts carrinhos={carrinhosAbandonados} />
                     </div>
-
                     <LeadsExitIntent leads={leadsExitIntent} />
                   </>
                 )}
               </TabsContent>
 
               <TabsContent value="cursos">
-                {/* O loading da aba cursos é separado (e mais rápido) */}
                 {cursos.length === 0 && loading ? (
                   <div className="text-center py-12">
                     <div className="animate-pulse text-lg">Carregando cursos...</div>
@@ -382,6 +376,12 @@ const Admin = () => {
                   </Card>
                 )}
               </TabsContent>
+              
+              {/* 5. Adiciona o conteúdo da nova aba */}
+              <TabsContent value="agente">
+                <AgentManager />
+              </TabsContent>
+
             </Tabs>
           </div>
         </main>
