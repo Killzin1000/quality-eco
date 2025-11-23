@@ -29,7 +29,7 @@ except Exception as e:
     model = None
 
 configuracao_geracao = genai.GenerationConfig(
-    temperature=0.5,
+    temperature=0.2,
     top_p=0.8,
     top_k=40
 )
@@ -467,7 +467,7 @@ Com isso, você já tem certeza dos requisitos acadêmicos. Quer que eu te envie
             resposta_ementa = f"""
 Ah, sim! A ementa é super importante, {nome_cliente_local}. 😊
 
-Você pode acessar a ementa completa do curso de **{session.curso_contexto}** por este link: {ementa_link}
+Você pode acessar a ementa completa do curso de **{session.curso_contexto}** por este link: [Ementa Completa]({ementa_link})
 
 Dê uma olhadinha com calma e me diga o que achou, combinado?
 """
@@ -476,6 +476,31 @@ Dê uma olhadinha com calma e me diga o que achou, combinado?
             print("LOG (Python): Resposta forçada de Ementa/Grade.")
             return resposta_ementa, session, None
 
+    # === ETAPA 1.4: INTERCEPTAR PERGUNTA SOBRE MEC/RECONHECIMENTO (Defensive Bypass) ===
+    if session.curso_contexto and ("mec" in msg_lower or "reconhecimento" in msg_lower or "valida" in msg_lower):
+        print("LOG (Python): Interceptando pergunta sobre MEC/Reconhecimento (Defensive Bypass).")
+        curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
+        
+        if curso_obj and curso_obj.get('Link e-MEC Curso'):
+            link_mec = curso_obj.get('Link e-MEC Curso')
+            nome_cliente_local = session.nome_cliente
+            
+            # Formato Markdown [label](link)
+            link_markdown = f"[Link para o e-MEC]({link_mec})"
+            
+            resposta_mec = f"""
+Compreendo perfeitamente sua pergunta, {nome_cliente_local}! É super importante ter essa segurança sobre o reconhecimento do curso.
+
+Sim, a **{session.curso_contexto}** é totalmente reconhecida pelo MEC! Isso significa que seu diploma terá validade em todo o território nacional.
+
+Você pode verificar o reconhecimento diretamente no site do e-MEC, através deste link: {link_markdown}
+
+Ter essa garantia é fundamental para sua jornada profissional, não é mesmo, {nome_cliente_local}? ✨
+"""
+            session.historico.append(ChatMessage(role="assistant", content=resposta_mec))
+            salvar_mensagem(session.nome_cliente, "assistant", resposta_mec)
+            print("LOG (Python): Resposta forçada de Reconhecimento MEC.")
+            return resposta_mec, session, None
 
     # === INTERCEPTAÇÃO DE NÚMEROS (PRIORIDADE MÁXIMA - BYPASS GEMINI) ===
     match_numero = re.match(r"^(\d+)$", mensagem.strip())
@@ -712,7 +737,7 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
                 
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
                 salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
-                return resposta_final, session, None
+                return resposta_final, session, navegar_para_link
                         
         print("LOG (Python): Resposta conversacional normal.")
         session.historico.append(ChatMessage(role="assistant", content=resposta_ia_conversacional))

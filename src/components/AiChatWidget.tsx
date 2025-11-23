@@ -68,8 +68,13 @@ export const AiChatWidget = () => {
               >
                 {/* Renderiza HTML com segurança */}
                 <div 
-                  dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />') }} 
-                  className="leading-relaxed w-full break-all" // <-- AJUSTE CRÍTICO APLICADO AQUI
+                  dangerouslySetInnerHTML={{ 
+                    __html: msg.content
+                      .replace(/\n/g, '<br />')
+                      // REGEX para converter [label](link) em <a href="link" target="_blank">label</a>
+                      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>') // <--- FIX NOVO
+                  }} 
+                  className="leading-relaxed w-full break-all"
                 />
               </div>
 
