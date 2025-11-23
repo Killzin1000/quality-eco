@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-# === CONFIGURAÇÕES ===
+# === CONFIGURAÇÕES E INICIALIZAÇÃO DE CLIENTES ===
 print("LOG (Python): Carregando variáveis de ambiente...")
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -29,7 +29,7 @@ except Exception as e:
     model = None
 
 configuracao_geracao = genai.GenerationConfig(
-    temperature=0.2,
+    temperature=0.5, # Mantendo 0.5 para mais humanidade
     top_p=0.8,
     top_k=40
 )
@@ -37,118 +37,18 @@ configuracao_geracao = genai.GenerationConfig(
 PROMPTS_MODULARES: Dict[str, str] = {}
 PROMPTS_CARREGADOS = False
 
-# === FUNÇÃO DE CARREGAMENTO DE PROMPTS ===
-def carregar_prompts_do_supabase() -> bool:
-    global PROMPTS_MODULARES, PROMPTS_CARREGADOS
-    print("LOG (Python): Carregando prompts modulares do Supabase...")
-    try:
-        # Nota: Selecionamos apenas prompts ATIVOS, o que é o comportamento correto.
-        response = supabase.table("agent_prompts").select("nome_chave, conteudo").eq('ativo', True).execute()
-        
-        if not response.data:
-            print("!!! ERRO CRÍTICO (Python): Nenhum prompt encontrado no Supabase.")
-            PROMPTS_CARREGADOS = False
-            return False
+# ==========================================================
+# === CORREÇÃO: INICIALIZAÇÃO DO APP FASTAPI E CORS ===
+app = FastAPI()
 
-        PROMPTS_MODULARES = {}
-        for prompt in response.data:
-            if prompt.get('nome_chave') and prompt.get('conteudo'):
-                PROMPTS_MODULARES[prompt['nome_chave']] = prompt['conteudo']
-        
-        print(f"LOG (Python): {len(PROMPTS_MODULARES)} prompts carregados com sucesso.")
-        PROMPTS_CARREGADOS = True
-        return True
-    except Exception as e:
-        print(f"!!! ERRO CRÍTICO (Python) ao carregar prompts: {e}")
-        PROMPTS_CARREGADOS = False
-        return False
-
-# === NOVA FUNÇÃO PARA SALVAR NO BANCO ===
-def salvar_mensagem(session_id: str, role: str, content: str):
-    """Salva uma mensagem individual na tabela chat_messages do Supabase"""
-    try:
-        content_to_save = content.replace("HIDDEN:", "")
-        supabase.table("chat_messages").insert({
-            "session_id": session_id,
-            "role": role,
-            "content": content_to_save
-        }).execute()
-    except Exception as e:
-        print(f"!!! ERRO AO SALVAR MENSAGEM NO DB: {e}")
-
-# === FUNÇÃO PARA MONTAR O PROMPT BASE ===
-def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Optional[str] = None) -> str:
-    global PROMPTS_MODULARES
-    
-    # 1. Busca dos prompts fixos
-    prompt_persona = PROMPTS_MODULARES.get('persona', "Você é um assistente.")
-    prompt_regras = PROMPTS_MODULARES.get('regras_gerais', "Seja educado.")
-    prompt_etapas = PROMPTS_MODULARES.get('etapas_atendimento', "Responda o cliente.")
-    prompt_objecoes = PROMPTS_MODULARES.get('regras_objecoes', "Tente reverter a objeção.")
-    prompt_elegibilidade = PROMPTS_MODULARES.get('regras_elegibilidade', "")
-    
-    # Lista de chaves já tratadas (para evitar duplicação no loop)
-    chaves_excluidas = ['persona', 'regras_gerais', 'etapas_atendimento', 'regras_objecoes', 'regras_elegibilidade', 'prompt_navegacao', 'prompt_finalizacao']
-    
-    # 2. Inclusão dinâmica dos prompts restantes
-    prompts_dinamicos = ""
-    for chave, conteudo in PROMPTS_MODULARES.items():
-        if chave not in chaves_excluidas:
-            # Adiciona o título do módulo no corpo do prompt para ajudar a IA a priorizar
-            prompts_dinamicos += f"\n--- MÓDULO: {chave.upper()} ---\n{conteudo}\n"
-
-    # Prompts de controle do sistema
-    prompt_navegacao = """
----
-### 8. REGRA DE NAVEGAÇÃO
-- Se o cliente pedir para "ir para a página do curso", "ver o curso", "me matricular" ou "quero comprar", e você souber DE QUAL CURSO ele está falando (seja pelo 'Contexto de Página' ou por um `[DADOS_CURSO_ENCONTRADO]` no histórico):
-- Responda de forma afirmativa (ex: "Claro, estou te redirecionando...") E ADICIONE a tag `[NAVEGAR_PARA]` na última linha.
----
-"""
-    
-    prompt_finalizacao = """
----
-### 9. REGRA DE OURO: FIDELIDADE AOS DADOS (CRÍTICO!)
-- **ATENÇÃO MÁXIMA:** Use APENAS os dados fornecidos no bloco `[DADOS_CURSO_ENCONTRADO]` abaixo.
-- Se o dado diz "Necessário Estágio?: Não", você DEVE dizer que **não tem estágio**.
-- Se o dado diz "Prazo de Conclusão: Mínimo 6", você DEVE dizer que são **6 meses**.
-- NÃO use a "Carga Horária" para chutar a duração em meses. Use o campo "Tempo de Conclusão".
-- Se você não sabe uma informação, diga que vai verificar com a secretaria, NÃO INVENTE.
-- Se for buscar um curso, sua resposta de usuário deve ser neutra (ex: "Vou verificar...") e a tag `[CURSO_BUSCA] NOME DO CURSO` deve vir DEPOIS, em uma nova linha.
----
-### 10. REGRA DE CONTEXTO ATIVO (CRÍTICO)
-- Se o campo 'Contexto de Página (Curso)' no PERFIL DO CLIENTE já estiver preenchido com um curso:
-- **NÃO USE** a tag `[CURSO_BUSCA]` para procurar esse mesmo curso novamente ou cursos similares.
-- Assuma que você JÁ TEM os dados dele no bloco `[DADOS_CURSO_ENCONTRADO]`.
-- Use `[CURSO_BUSCA]` **SOMENTE** se o cliente disser EXPLICITAMENTE: "quero ver outro curso", "mudar de curso", "busque por X".
----
-"""
-
-    # 3. Construção do prompt base com TUDO
-    prompt_base = f"""
-{prompt_persona}
-{prompt_regras}
-{prompt_objecoes}
-{prompt_etapas}
-{prompt_elegibilidade}
-{prompt_navegacao}
-{prompt_finalizacao}
-{prompts_dinamicos}
-"""
-
-    if dados_curso_injetados:
-        prompt_base += f"\n{dados_curso_injetados}\n"
-
-    prompt_completo = f"""
-{prompt_base}
-
-{perfil_cliente_prompt}
-
-Sua tarefa principal é gerar a resposta conversacional.
-**Siga TODAS as regras definidas acima, especialmente a FIDELIDADE AOS DADOS e a PRESERVAÇÃO DO CONTEXTO.**
-"""
-    return prompt_completo
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Permite acesso do seu frontend (Vite/React)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# ==========================================================
 
 # === MODELOS DE DADOS ===
 class ChatMessage(BaseModel):
@@ -172,17 +72,74 @@ class ChatResponse(BaseModel):
     session_atualizada: ChatSession
     navegar_para: Optional[str] = None
 
-# === INICIALIZAÇÃO DA API ===
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# === FUNÇÕES DE LÓGICA ===
+# === FUNÇÕES HELPERS DE DB/LOGIC ===
+
+def carregar_prompts_do_supabase() -> bool:
+    global PROMPTS_MODULARES, PROMPTS_CARREGADOS
+    print("LOG (Python): Carregando prompts modulares do Supabase...")
+    try:
+        response = supabase.table("agent_prompts").select("nome_chave, conteudo").eq('ativo', True).execute()
+        
+        if not response.data:
+            print("!!! ERRO CRÍTICO (Python): Nenhum prompt encontrado no Supabase.")
+            PROMPTS_CARREGADOS = False
+            return False
+
+        PROMPTS_MODULARES = {}
+        for prompt in response.data:
+            if prompt.get('nome_chave') and prompt.get('conteudo'):
+                PROMPTS_MODULARES[prompt['nome_chave']] = prompt['conteudo']
+        
+        print(f"LOG (Python): {len(PROMPTS_MODULARES)} prompts carregados com sucesso.")
+        PROMPTS_CARREGADOS = True
+        return True
+    except Exception as e:
+        print(f"!!! ERRO CRÍTICO (Python) ao carregar prompts: {e}")
+        PROMPTS_CARREGADOS = False
+        return False
+
+def salvar_mensagem(session_id: str, role: str, content: str):
+    """Salva uma mensagem individual na tabela chat_messages do Supabase"""
+    try:
+        content_to_save = content.replace("HIDDEN:", "")
+        supabase.table("chat_messages").insert({
+            "session_id": session_id,
+            "role": role,
+            "content": content_to_save
+        }).execute()
+    except Exception as e:
+        print(f"!!! ERRO AO SALVAR MENSAGEM NO DB: {e}")
+
+def salvar_lead_chat(session: ChatSession):
+    """Realiza UPSERT na tabela leads_chat com os dados da sessão."""
+    try:
+        # O session_id para o DB é sempre o nome_cliente.
+        # Se for "visitante", ele usa o ID de sessão único gerado pelo frontend.
+        session_identifier = session.nome_cliente 
+        
+        # O nome real do lead só é salvo se for diferente de 'visitante'
+        nome_lead = session.nome_cliente if session.nome_cliente != "visitante" else None
+        
+        # Construindo o payload para UPSERT
+        data_to_upsert = {
+            "session_id": session_identifier,
+            "nome": nome_lead,
+            "formacao": session.formacao_cliente,
+            "area_preferencial": session.area_preferencial,
+            "curso_contexto": session.curso_contexto,
+            "status": "parcial", 
+        }
+        
+        supabase.table("leads_chat").upsert(
+            data_to_upsert,
+            on_conflict="session_id" # Chave para identificar e atualizar o registro
+        ).execute()
+        
+        print(f"LOG (Lead Save): Lead para '{session_identifier}' atualizado/salvo com sucesso.")
+        
+    except Exception as e:
+        print(f"!!! ERRO AO SALVAR LEAD NO DB: {e}")
 
 def detectar_tipo_e_palavras_chave(termo_busca_ia: str) -> Tuple[str, List[str]]:
     termo_lower = termo_busca_ia.lower()
@@ -265,6 +222,78 @@ def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Opti
     except Exception as e:
         pass
     return None
+
+def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Optional[str] = None) -> str:
+    global PROMPTS_MODULARES
+    
+    # 1. Busca dos prompts fixos
+    prompt_persona = PROMPTS_MODULARES.get('persona', "Você é um assistente.")
+    prompt_regras = PROMPTS_MODULARES.get('regras_gerais', "Seja educado.")
+    prompt_etapas = PROMPTS_MODULARES.get('etapas_atendimento', "Responda o cliente.")
+    prompt_objecoes = PROMPTS_MODULARES.get('regras_objecoes', "Tente reverter a objeção.")
+    prompt_elegibilidade = PROMPTS_MODULARES.get('regras_elegibilidade', "")
+    
+    # Lista de chaves já tratadas (para evitar duplicação no loop)
+    chaves_excluidas = ['persona', 'regras_gerais', 'etapas_atendimento', 'regras_objecoes', 'regras_elegibilidade', 'prompt_navegacao', 'prompt_finalizacao']
+    
+    # 2. Inclusão dinâmica dos prompts restantes
+    prompts_dinamicos = ""
+    for chave, conteudo in PROMPTS_MODULARES.items():
+        if chave not in chaves_excluidas:
+            # Adiciona o título do módulo no corpo do prompt para ajudar a IA a priorizar
+            prompts_dinamicos += f"\n--- MÓDULO: {chave.upper()} ---\n{conteudo}\n"
+
+    # Prompts de controle do sistema
+    prompt_navegacao = """
+---
+### 8. REGRA DE NAVEGAÇÃO
+- Se o cliente pedir para "ir para a página do curso", "ver o curso", "me matricular" ou "quero comprar", e você souber DE QUAL CURSO ele está falando (seja pelo 'Contexto de Página' ou por um `[DADOS_CURSO_ENCONTRADO]` no histórico):
+- Responda de forma afirmativa (ex: "Claro, estou te redirecionando...") E ADICIONE a tag `[NAVEGAR_PARA]` na última linha.
+---
+"""
+    
+    prompt_finalizacao = """
+---
+### 9. REGRA DE OURO: FIDELIDADE AOS DADOS (CRÍTICO!)
+- **ATENÇÃO MÁXIMA:** Use APENAS os dados fornecidos no bloco `[DADOS_CURSO_ENCONTRADO]` abaixo.
+- Se o dado diz "Necessário Estágio?: Não", você DEVE dizer que **não tem estágio**.
+- Se o dado diz "Prazo de Conclusão: Mínimo 6", você DEVE dizer que são **6 meses**.
+- NÃO use a "Carga Horária" para chutar a duração em meses. Use o campo "Tempo de Conclusão".
+- Se você não sabe uma informação, diga que vai verificar com a secretaria, NÃO INVENTE.
+- Se for buscar um curso, sua resposta de usuário deve ser neutra (ex: "Vou verificar...") e a tag `[CURSO_BUSCA] NOME DO CURSO` deve vir DEPOIS, em uma nova linha.
+---
+### 10. REGRA DE CONTEXTO ATIVO (CRÍTICO)
+- Se o campo 'Contexto de Página (Curso)' no PERFIL DO CLIENTE já estiver preenchido com um curso:
+- **NÃO USE** a tag `[CURSO_BUSCA]` para procurar esse mesmo curso novamente ou cursos similares.
+- Assuma que você JÁ TEM os dados dele no bloco `[DADOS_CURSO_ENCONTRADO]`.
+- Use `[CURSO_BUSCA]` **SOMENTE** se o cliente disser EXPLICITAMENTE: "quero ver outro curso", "mudar de curso", "busque por X".
+---
+"""
+
+    # 3. Construção do prompt base com TUDO
+    prompt_base = f"""
+{prompt_persona}
+{prompt_regras}
+{prompt_objecoes}
+{prompt_etapas}
+{prompt_elegibilidade}
+{prompt_navegacao}
+{prompt_finalizacao}
+{prompts_dinamicos}
+"""
+
+    if dados_curso_injetados:
+        prompt_base += f"\n{dados_curso_injetados}\n"
+
+    prompt_completo = f"""
+{prompt_base}
+
+{perfil_cliente_prompt}
+
+Sua tarefa principal é gerar a resposta conversacional.
+**Siga TODAS as regras definidas acima, especialmente a FIDELIDADE AOS DADOS e a PRESERVAÇÃO DO CONTEXTO.**
+"""
+    return prompt_completo
 
 def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = False):
     nome = curso.get("Nome dos cursos", "Curso Não Encontrado")
@@ -565,6 +594,8 @@ Isso se alinha com o que você imaginava para o curso?
                         salvar_mensagem(session.nome_cliente, "assistant", resposta_detalhada_python)
                         print("LOG (Python): Resposta forçada após seleção numérica. Bypassing Gemini call.")
 
+                        # Salvando o lead após a definição do curso
+                        salvar_lead_chat(session)
                         return resposta_detalhada_python, session, None
                     else:
                          # Se o curso não for achado (DB ou nome errado), damos uma mensagem de erro controlada.
@@ -593,6 +624,7 @@ Isso se alinha com o que você imaginava para o curso?
 
     historico_recente_bot = [msg for msg in session.historico if msg.role == "assistant"]
     
+    # 2. SE NÃO HOUVE BYPASS, VERIFICA E ATUALIZA O CONTEXTO PARA O GEMINI
     if session.curso_contexto:
         print(f"LOG (Python): Contexto ativo: {session.curso_contexto}. Atualizando dados...")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
@@ -610,6 +642,10 @@ Isso se alinha com o que você imaginava para o curso?
         session.historico.append(ChatMessage(role="user", content=mensagem))
     
     nome_cliente_local = session.nome_cliente
+    
+    # === CHAMADA PARA SALVAR LEAD A CADA ATUALIZAÇÃO DE PERFIL ===
+    salvar_lead_chat(session) 
+    # ==========================================================
 
     perfil_cliente_prompt = f"""
 ---
@@ -737,7 +773,7 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
                 
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
                 salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
-                return resposta_final, session, navegar_para_link
+                return resposta_final, session, None
                         
         print("LOG (Python): Resposta conversacional normal.")
         session.historico.append(ChatMessage(role="assistant", content=resposta_ia_conversacional))

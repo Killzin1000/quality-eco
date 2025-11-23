@@ -42,7 +42,6 @@ export type Database = {
         }
         Relationships: []
       }
-      // --- NOVA TABELA ADICIONADA AQUI ---
       chat_messages: {
         Row: {
           id: string
@@ -67,7 +66,47 @@ export type Database = {
         }
         Relationships: []
       }
-      // -----------------------------------
+      // === NOVA TABELA DE LEADS DE CHAT ===
+      leads_chat: {
+        Row: {
+          id: string
+          session_id: string
+          nome: string | null
+          telefone: string | null
+          formacao: string | null
+          area_preferencial: string | null
+          curso_contexto: string | null
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          nome?: string | null
+          telefone?: string | null
+          formacao?: string | null
+          area_preferencial?: string | null
+          curso_contexto?: string | null
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          nome?: string | null
+          telefone?: string | null
+          formacao?: string | null
+          area_preferencial?: string | null
+          curso_contexto?: string | null
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      // ======================================
       avaliacoes: {
         Row: {
           comentario: string
@@ -159,8 +198,8 @@ export type Database = {
           "Link Cronograma": string | null
           "Link e-MEC Curso": string | null
           Modalidade: string | null
-          "Necessário Artigo?": string | null
-          "Necessário Estágio?": string | null
+          "Necessário Artigo?"?: string | null
+          "Necessário Estágio?"?: string | null
           "Nome dos cursos": string | null
           "Número da Turma": string | null
           Observações: string | null
@@ -415,7 +454,6 @@ export type Database = {
           }
         ]
       }
-      // NOVA DEFINIÇÃO CORRIGIDA
       sessoes_usuario: {
         Row: {
           id: string
