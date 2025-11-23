@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, Plus, BarChart3, Calendar as CalendarIcon, Bot } from "lucide-react"; // 1. Importa o ícone 'Bot'
+import { Pencil, Trash2, Plus, BarChart3, Calendar as CalendarIcon, Bot, MessageSquare } from "lucide-react"; // Adicionado MessageSquare
 import { toast } from "sonner";
 import { ProtectedRoute } from "@/components/admin/ProtectedRoute";
 import { DashboardStats } from "@/components/admin/DashboardStats";
@@ -20,7 +20,8 @@ import { ptBR } from "date-fns/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { AgentManager } from "@/components/admin/AgentManager"; // 2. Importa o novo componente
+import { AgentManager } from "@/components/admin/AgentManager";
+import { ChatMonitor } from "@/components/admin/ChatMonitor"; // Importação do novo componente
 
 const Admin = () => {
   const [cursos, setCursos] = useState<any[]>([]);
@@ -74,7 +75,6 @@ const Admin = () => {
     console.log(`LOG: Buscando dados de ${fromDate.toISOString()} até ${toDate.toISOString()}`);
 
     try {
-      // ... (toda a lógica de fetchAnalytics continua a mesma) ...
       // Buscar estatísticas gerais
       const { data: visualizacoes } = await supabase
         .from("curso_visualizacoes")
@@ -289,17 +289,20 @@ const Admin = () => {
             </div>
 
             <Tabs defaultValue="analytics" className="space-y-6">
-              {/* 3. Ajusta o grid para 3 colunas */}
-              <TabsList className="grid w-full grid-cols-3 lg:w-auto">
+              {/* Grid ajustado para 4 colunas para acomodar a nova aba */}
+              <TabsList className="grid w-full grid-cols-4 lg:w-auto">
                 <TabsTrigger value="analytics" className="gap-2">
                   <BarChart3 className="h-4 w-4" />
                   Analytics
                 </TabsTrigger>
                 <TabsTrigger value="cursos">Cursos</TabsTrigger>
-                {/* 4. Adiciona a nova aba */}
                 <TabsTrigger value="agente" className="gap-2">
                   <Bot className="h-4 w-4" />
                   Agente IA
+                </TabsTrigger>
+                <TabsTrigger value="monitor" className="gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Monitoramento
                 </TabsTrigger>
               </TabsList>
 
@@ -377,9 +380,12 @@ const Admin = () => {
                 )}
               </TabsContent>
               
-              {/* 5. Adiciona o conteúdo da nova aba */}
               <TabsContent value="agente">
                 <AgentManager />
+              </TabsContent>
+
+              <TabsContent value="monitor">
+                <ChatMonitor />
               </TabsContent>
 
             </Tabs>

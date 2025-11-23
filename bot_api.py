@@ -62,6 +62,19 @@ def carregar_prompts_do_supabase() -> bool:
         PROMPTS_CARREGADOS = False
         return False
 
+# === NOVA FUNÇÃO PARA SALVAR NO BANCO ===
+def salvar_mensagem(session_id: str, role: str, content: str):
+    """Salva uma mensagem individual na tabela chat_messages do Supabase"""
+    try:
+        content_to_save = content.replace("HIDDEN:", "")
+        supabase.table("chat_messages").insert({
+            "session_id": session_id,
+            "role": role,
+            "content": content_to_save
+        }).execute()
+    except Exception as e:
+        print(f"!!! ERRO AO SALVAR MENSAGEM NO DB: {e}")
+
 # === FUNÇÃO PARA MONTAR O PROMPT BASE ===
 def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Optional[str] = None) -> str:
     global PROMPTS_MODULARES
@@ -90,6 +103,12 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 - Se você não sabe uma informação, diga que vai verificar com a secretaria, NÃO INVENTE.
 - Se for buscar um curso, sua resposta de usuário deve ser neutra (ex: "Vou verificar...") e a tag `[CURSO_BUSCA] NOME DO CURSO` deve vir DEPOIS, em uma nova linha.
 ---
+### 10. REGRA DE CONTEXTO ATIVO (CRÍTICO)
+- Se o campo 'Contexto de Página (Curso)' no PERFIL DO CLIENTE já estiver preenchido com um curso:
+- **NÃO USE** a tag `[CURSO_BUSCA]` para procurar esse mesmo curso novamente ou cursos similares.
+- Assuma que você JÁ TEM os dados dele no bloco `[DADOS_CURSO_ENCONTRADO]`.
+- Use `[CURSO_BUSCA]` **SOMENTE** se o cliente disser EXPLICITAMENTE: "quero ver outro curso", "mudar de curso", "busque por X".
+---
 """
 
     prompt_base = f"""
@@ -111,7 +130,7 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 {perfil_cliente_prompt}
 
 Sua tarefa principal é gerar a resposta conversacional.
-**Siga TODAS as regras definidas acima, especialmente a FIDELIDADE AOS DADOS.**
+**Siga TODAS as regras definidas acima, especialmente a FIDELIDADE AOS DADOS e a PRESERVAÇÃO DO CONTEXTO.**
 """
     return prompt_completo
 
@@ -259,9 +278,9 @@ def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = Fa
     
     if resumido:
          resposta_gancho = (f"Opção: **{nome}**\n" f"• **Tipo:** {tipo}\n" f"• **Área:** {area}")
-    else:
-        resposta_gancho = (f"Perfeito, {nome_cliente}! 🎓\n" f"Encontrei o curso de **{nome}**. Ele é uma **{tipo}** focada exatamente na área de **{area}**.")
+         return resposta_gancho, "" # Não retornamos dados ocultos no resumido
     
+    resposta_gancho = (f"Perfeito, {nome_cliente}! 🎓\n" f"Encontrei o curso de **{nome}**. Ele é uma **{tipo}** focada exatamente na área de **{area}**.")
     pergunta_fechamento = f"Isso se alinha com o que {nome_tratado} estava pensando? Se sim, já te passo mais detalhes sobre a duração e a modalidade dele. 😉"
     
     dados_para_contexto = f"""
@@ -289,10 +308,7 @@ def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = Fa
     - Observações: {obs}
     =============================================
     """
-    if resumido:
-        return resposta_gancho, dados_para_contexto
-    else:
-        return resposta_gancho, dados_para_contexto, pergunta_fechamento
+    return resposta_gancho, dados_para_contexto, pergunta_fechamento
 
 def atualizar_dados_cliente(session: ChatSession, mensagem_usuario: str, historico_recente_bot: list) -> bool:
     msg_lower = mensagem_usuario.lower()
@@ -360,6 +376,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     
     navegar_para_link = None
     dados_do_contexto = None 
+    curso_selecionado_via_numero = None # Variável para controle de seleção forçada
     
     if not PROMPTS_CARREGADOS:
         print("LOG (Python): Prompts não carregados. Tentando carregar agora...")
@@ -369,11 +386,37 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
              session.historico.append(ChatMessage(role="assistant", content=resposta_erro))
              return resposta_erro, session, None
 
+    # SALVAR MSG USUARIO
+    if mensagem != "...iniciar...":
+        salvar_mensagem(session.nome_cliente, "user", mensagem)
+
+    # === INTERCEPTAÇÃO DE NÚMEROS ===
+    match_numero = re.match(r"^(\d+)$", mensagem.strip())
+    if match_numero and session.historico and session.historico[-1].role == "assistant":
+        try:
+            last_msg = session.historico[-1].content
+            opcoes = re.findall(r"\n(\d+)\.\s+(.*?)(?=\n|$)", last_msg)
+            
+            if opcoes:
+                indice_escolhido = int(match_numero.group(1))
+                
+                for num_str, nome_curso in opcoes:
+                    if int(num_str) == indice_escolhido:
+                        curso_selecionado_via_numero = nome_curso.strip()
+                        break
+                
+                if curso_selecionado_via_numero:
+                    print(f"LOG (Python): Usuário digitou '{mensagem}' -> Interpretado como: {curso_selecionado_via_numero}")
+                    mensagem = f"Quero saber mais sobre o curso {curso_selecionado_via_numero}"
+                    session.curso_contexto = curso_selecionado_via_numero
+        except Exception as e:
+            print(f"LOG (Python): Erro ao tentar interpretar seleção numérica: {e}")
+    # ========================================
+
     historico_recente_bot = [msg for msg in session.historico if msg.role == "assistant"]
     
     if session.curso_contexto:
-        print(f"LOG (Python): Contexto ativo: {session.curso_contexto}. Atualizando dados para o prompt...")
-        # Chama com completo=True explicitamente
+        print(f"LOG (Python): Contexto ativo: {session.curso_contexto}. Atualizando dados...")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
         if curso_obj:
             _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, session.nome_cliente)
@@ -385,8 +428,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
         atualizar_dados_cliente(session, mensagem, historico_recente_bot)
         session.historico.append(ChatMessage(role="user", content=mensagem))
     
-    # --- CORREÇÃO: Definição da variável 'nome_cliente_local' ---
-    nome_cliente_local = session.nome_cliente # <--- ADICIONADA AQUI
+    nome_cliente_local = session.nome_cliente
 
     perfil_cliente_prompt = f"""
 ---
@@ -401,15 +443,16 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     
     if not dados_do_contexto:
         for msg in reversed(session.historico):
-             if msg.content.startswith("[DADOS_CURSO_ENCONTRADO:"):
-                  dados_do_contexto = msg.content
+             if "[DADOS_CURSO_ENCONTRADO:" in msg.content:
+                  content_clean = msg.content.replace("HIDDEN:", "")
+                  dados_do_contexto = content_clean
                   break
     
     prompt_sistema_completo = montar_prompt_base(perfil_cliente_prompt, dados_do_contexto)
     
     historico_limpo_str = ""
     for msg in session.historico[-10:]:
-        if not msg.content.startswith("[DADOS_CURSO_ENCONTRADO:"):
+        if not msg.content.startswith("HIDDEN:") and not msg.content.startswith("[DADOS_CURSO_ENCONTRADO:"):
             role_str = "Bot" if msg.role in ["bot", "assistant"] else "Usuário"
             historico_limpo_str += f"{role_str}: {msg.content}\n"
 
@@ -420,6 +463,8 @@ Histórico recente da conversa:
 {historico_limpo_str}
 
 Nova mensagem do usuário: "{mensagem}"
+
+OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver escolhido uma opção, assuma que o curso escolhido é o foco agora e use os dados dele.
 """
 
     try:
@@ -454,56 +499,82 @@ Nova mensagem do usuário: "{mensagem}"
                     navegar_para_link = f"/curso/{curso_obj.get('id')}"
             else:
                  print("!!! ERRO (Python): IA pediu para navegar mas não achou curso.")
+            
+            salvar_mensagem(session.nome_cliente, "assistant", resposta_ia_conversacional)
 
         elif match_busca: 
             print("LOG (Python): IA solicitou [CURSO_BUSCA]")
             resposta_ia_conversacional = resposta_bruta.split(match_busca.group(0))[0].strip()
             termo_principal = match_busca.group(2).strip()
             
-            cursos_encontrados_raw = buscar_cursos_relevantes(termo_principal, session.area_preferencial)
+            # === BLINDAGEM DE CONTEXTO ===
+            # Se o usuário escolheu via número AGORA (curso_selecionado_via_numero não é None),
+            # FORÇAMOS esse curso a ser o "encontrado", ignorando a busca vaga da IA.
+            if curso_selecionado_via_numero:
+                 print(f"LOG (Python): Seleção numérica detectada '{curso_selecionado_via_numero}'. Ignorando busca vaga e focando neste curso.")
+                 curso_obj = buscar_curso_por_nome_exato(curso_selecionado_via_numero, completo=True)
+                 cursos_encontrados_raw = [curso_obj] if curso_obj else []
+            
+            # Se já temos contexto e a busca é redundante, ignoramos
+            elif session.curso_contexto and termo_principal.lower() in session.curso_contexto.lower():
+                 print("LOG (Python): Busca redundante. Mantendo contexto.")
+                 cursos_encontrados_raw = []
+            else:
+                 cursos_encontrados_raw = buscar_cursos_relevantes(termo_principal, session.area_preferencial)
+            # =============================
             
             if cursos_encontrados_raw:
-                ids_cursos = [c['id'] for c in cursos_encontrados_raw]
-                resp_completos = supabase.table("cursos").select("*").in_("id", ids_cursos).execute()
-                cursos_encontrados_raw = resp_completos.data or []
+                # Se tivermos objetos completos (do force search), não precisamos re-buscar por ID
+                if 'Nome dos cursos' not in cursos_encontrados_raw[0]: 
+                    ids_cursos = [c['id'] for c in cursos_encontrados_raw]
+                    resp_completos = supabase.table("cursos").select("*").in_("id", ids_cursos).execute()
+                    cursos_encontrados_raw = resp_completos.data or []
 
-            if not cursos_encontrados_raw:
+            if not cursos_encontrados_raw and not session.curso_contexto:
                 resposta_falha = resposta_ia_conversacional + f"\n\nOps, {nome_cliente_local}. Não encontrei cursos com esse nome."
                 session.historico.append(ChatMessage(role="assistant", content=resposta_falha))
+                salvar_mensagem(session.nome_cliente, "assistant", resposta_falha)
                 return resposta_falha, session, None
             
             if len(cursos_encontrados_raw) == 1:
                 print("LOG (Python): 1 curso encontrado.")
                 curso = cursos_encontrados_raw[0]
-                # Usa nome_cliente_local aqui
+                session.curso_contexto = curso.get('Nome dos cursos')
+                
                 gancho, dados_ocultos, pergunta = montar_resposta_dividida(curso, nome_cliente_local, resumido=False)
-                session.historico.append(ChatMessage(role="assistant", content=dados_ocultos))
+                
+                session.historico.append(ChatMessage(role="assistant", content=f"HIDDEN:{dados_ocultos}"))
+                
                 resposta_final = f"{resposta_ia_conversacional}\n\n{gancho}\n\n{pergunta}"
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
+                
+                salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
                 return resposta_final, session, None
 
             if len(cursos_encontrados_raw) > 1:
-                print(f"LOG (Python): {len(cursos_encontrados_raw)} cursos encontrados.")
-                for curso in cursos_encontrados_raw:
-                    # Usa nome_cliente_local aqui
-                    gancho, dados_ocultos = montar_resposta_dividida(curso, nome_cliente_local, resumido=True)
-                    session.historico.append(ChatMessage(role="assistant", content=dados_ocultos))
+                print(f"LOG (Python): {len(cursos_encontrados_raw)} cursos encontrados. Listando opções numeradas.")
                 
                 resposta_final = resposta_ia_conversacional + "\n\nEncontrei estas opções:\n"
-                for curso in cursos_encontrados_raw:
-                     resposta_final += f"\n- {curso.get('Nome dos cursos', 'Curso')}"
+                for i, curso in enumerate(cursos_encontrados_raw, 1):
+                     nome_do_curso = curso.get('Nome dos cursos', 'Curso')
+                     resposta_final += f"\n{i}. {nome_do_curso}"
+                
+                resposta_final += "\n\nPor favor, digite o **número** da opção que deseja conhecer melhor (ex: 1)."
                 
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
+                salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
                 return resposta_final, session, None
                         
         print("LOG (Python): Resposta conversacional normal.")
         session.historico.append(ChatMessage(role="assistant", content=resposta_ia_conversacional))
+        salvar_mensagem(session.nome_cliente, "assistant", resposta_ia_conversacional)
         return resposta_ia_conversacional, session, navegar_para_link
 
     except Exception as e:
         print(f"LOG (Python) ERRO GEMINI: {e}")
         resposta_erro = f"Ocorreu um erro ao gerar a resposta. [LOG INTERNO: {e}]"
         session.historico.append(ChatMessage(role="assistant", content=resposta_erro))
+        salvar_mensagem(session.nome_cliente, "system_error", str(e))
         return resposta_erro, session, None
 
 

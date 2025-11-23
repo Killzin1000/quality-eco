@@ -9,7 +9,7 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      agent_prompts: {  // <--- ADICIONADO AQUI
+      agent_prompts: {
         Row: {
           id: string
           nome_chave: string
@@ -42,6 +42,32 @@ export type Database = {
         }
         Relationships: []
       }
+      // --- NOVA TABELA ADICIONADA AQUI ---
+      chat_messages: {
+        Row: {
+          id: string
+          session_id: string
+          role: string
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          role: string
+          content: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          role?: string
+          content?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      // -----------------------------------
       avaliacoes: {
         Row: {
           comentario: string
@@ -88,7 +114,7 @@ export type Database = {
           email: string
           id: string
           telefone: string
-          nome: string | null // Atualizado conforme migração anterior
+          nome: string | null
         }
         Insert: {
           created_at?: string
@@ -296,7 +322,7 @@ export type Database = {
           id: string
           codigo: string
           desconto_percentual: number
-          tipo: string // 'manual', 'exit_intent'
+          tipo: string
           ativo: boolean
           uso_atual: number
           uso_maximo: number
