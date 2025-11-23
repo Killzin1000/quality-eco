@@ -60,9 +60,7 @@ export const AiChatWidget = () => {
                 className={cn(
                   "rounded-2xl px-4 py-3 shadow-sm text-sm",
                   "max-w-[85%]", // Limite de largura
-                  "break-words", // Quebra palavras longas
-                  "whitespace-pre-wrap", // Mantém quebras de linha mas quebra se necessário
-                  "overflow-hidden", // Garante que nada saia
+                  "whitespace-pre-wrap", // Mantém quebras de linha mas permite wrapping
                   msg.role === "user"
                     ? "bg-primary text-primary-foreground rounded-br-none"
                     : "bg-muted text-muted-foreground rounded-bl-none border border-border"
@@ -71,7 +69,7 @@ export const AiChatWidget = () => {
                 {/* Renderiza HTML com segurança */}
                 <div 
                   dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />') }} 
-                  className="leading-relaxed"
+                  className="leading-relaxed w-full break-all" // <-- AJUSTE CRÍTICO APLICADO AQUI
                 />
               </div>
 

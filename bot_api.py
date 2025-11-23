@@ -29,7 +29,7 @@ except Exception as e:
     model = None
 
 configuracao_geracao = genai.GenerationConfig(
-    temperature=0.2,
+    temperature=0.5,
     top_p=0.8,
     top_k=40
 )
@@ -42,7 +42,8 @@ def carregar_prompts_do_supabase() -> bool:
     global PROMPTS_MODULARES, PROMPTS_CARREGADOS
     print("LOG (Python): Carregando prompts modulares do Supabase...")
     try:
-        response = supabase.table("agent_prompts").select("nome_chave, conteudo").execute()
+        # Nota: Selecionamos apenas prompts ATIVOS, o que é o comportamento correto.
+        response = supabase.table("agent_prompts").select("nome_chave, conteudo").eq('ativo', True).execute()
         
         if not response.data:
             print("!!! ERRO CRÍTICO (Python): Nenhum prompt encontrado no Supabase.")
@@ -79,12 +80,24 @@ def salvar_mensagem(session_id: str, role: str, content: str):
 def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Optional[str] = None) -> str:
     global PROMPTS_MODULARES
     
+    # 1. Busca dos prompts fixos
     prompt_persona = PROMPTS_MODULARES.get('persona', "Você é um assistente.")
     prompt_regras = PROMPTS_MODULARES.get('regras_gerais', "Seja educado.")
     prompt_etapas = PROMPTS_MODULARES.get('etapas_atendimento', "Responda o cliente.")
     prompt_objecoes = PROMPTS_MODULARES.get('regras_objecoes', "Tente reverter a objeção.")
     prompt_elegibilidade = PROMPTS_MODULARES.get('regras_elegibilidade', "")
     
+    # Lista de chaves já tratadas (para evitar duplicação no loop)
+    chaves_excluidas = ['persona', 'regras_gerais', 'etapas_atendimento', 'regras_objecoes', 'regras_elegibilidade', 'prompt_navegacao', 'prompt_finalizacao']
+    
+    # 2. Inclusão dinâmica dos prompts restantes
+    prompts_dinamicos = ""
+    for chave, conteudo in PROMPTS_MODULARES.items():
+        if chave not in chaves_excluidas:
+            # Adiciona o título do módulo no corpo do prompt para ajudar a IA a priorizar
+            prompts_dinamicos += f"\n--- MÓDULO: {chave.upper()} ---\n{conteudo}\n"
+
+    # Prompts de controle do sistema
     prompt_navegacao = """
 ---
 ### 8. REGRA DE NAVEGAÇÃO
@@ -111,6 +124,7 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 ---
 """
 
+    # 3. Construção do prompt base com TUDO
     prompt_base = f"""
 {prompt_persona}
 {prompt_regras}
@@ -119,6 +133,7 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 {prompt_elegibilidade}
 {prompt_navegacao}
 {prompt_finalizacao}
+{prompts_dinamicos}
 """
 
     if dados_curso_injetados:
@@ -233,7 +248,6 @@ def buscar_cursos_relevantes(termo_busca_ia: str, area_preferencial: str = None)
 def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Optional[Dict]:
     global supabase
     try:
-        print(f"LOG (Python): Buscando ID para o nome exato: '{nome_curso}' (Completo={completo})")
         if completo:
             select_cols = (
                 "id, \"Nome dos cursos\", \"Tipo\", \"Modalidade\", \"Carga Horária\", "
@@ -249,7 +263,7 @@ def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Opti
         if response.data:
             return response.data
     except Exception as e:
-        print(f"LOG (Python) AVISO SUPABASE (Nome Exato): {e}")
+        pass
     return None
 
 def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = False):
@@ -283,10 +297,12 @@ def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = Fa
     resposta_gancho = (f"Perfeito, {nome_cliente}! 🎓\n" f"Encontrei o curso de **{nome}**. Ele é uma **{tipo}** focada exatamente na área de **{area}**.")
     pergunta_fechamento = f"Isso se alinha com o que {nome_tratado} estava pensando? Se sim, já te passo mais detalhes sobre a duração e a modalidade dele. 😉"
     
+    # Adicionando o ID ao bloco de dados para garantir que a IA (se for chamada) possa usá-lo
     dados_para_contexto = f"""
     [DADOS_CURSO_ENCONTRADO: {nome}]
     =============================================
     DADOS OFICIAIS DO SISTEMA (USE ESTES DADOS EXATAMENTE):
+    - ID do Curso: {curso.get('id')}
     - Nome do Curso: {nome}
     - Tipo: {tipo}
     - Modalidade: {modalidade}
@@ -376,7 +392,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     
     navegar_para_link = None
     dados_do_contexto = None 
-    curso_selecionado_via_numero = None # Variável para controle de seleção forçada
+    curso_selecionado_via_numero = None
     
     if not PROMPTS_CARREGADOS:
         print("LOG (Python): Prompts não carregados. Tentando carregar agora...")
@@ -386,11 +402,82 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
              session.historico.append(ChatMessage(role="assistant", content=resposta_erro))
              return resposta_erro, session, None
 
-    # SALVAR MSG USUARIO
+    # SALVAR MSG USUARIO (O Python fará isso se não for a mensagem inicial)
     if mensagem != "...iniciar...":
         salvar_mensagem(session.nome_cliente, "user", mensagem)
+    
+    msg_lower = mensagem.lower()
+    
+    # === ETAPA 1.1: INTERCEPTAR PERGUNTA SOBRE CARGA HORÁRIA (Defensive Bypass) ===
+    if session.curso_contexto and ("carga horaria" in msg_lower or "carga horária" in msg_lower):
+        print("LOG (Python): Interceptando pergunta sobre Carga Horária (Defensive Bypass).")
+        curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
+        
+        if curso_obj and curso_obj.get('Carga Horária'):
+            carga_horaria_txt = curso_obj.get('Carga Horária')
+            nome_cliente_local = session.nome_cliente
+            
+            resposta_cargahoraria = f"""
+Claro, {nome_cliente_local}! A carga horária total para o curso de **{session.curso_contexto}** é de **{carga_horaria_txt}**.
 
-    # === INTERCEPTAÇÃO DE NÚMEROS ===
+Mais alguma dúvida sobre os detalhes acadêmicos? Caso contrário, podemos falar sobre os valores de investimento! 😉
+"""
+            session.historico.append(ChatMessage(role="assistant", content=resposta_cargahoraria))
+            salvar_mensagem(session.nome_cliente, "assistant", resposta_cargahoraria)
+            print(f"LOG (Python): Resposta forçada de Carga Horária: {carga_horaria_txt}")
+            return resposta_cargahoraria, session, None
+
+    # === ETAPA 1.2: INTERCEPTAR PERGUNTA SOBRE ARTIGO/TCC/ESTÁGIO (Defensive Bypass) ===
+    if session.curso_contexto and ("artigo" in msg_lower or "tcc" in msg_lower or "estágio" in msg_lower or "estagio" in msg_lower):
+        print("LOG (Python): Interceptando pergunta sobre Artigo/Estágio (Defensive Bypass).")
+        curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
+        
+        if curso_obj:
+            artigo_val = curso_obj.get('Necessário Artigo?', 'Não Informado')
+            estagio_val = curso_obj.get('Necessário Estágio?', 'Não Informado')
+            nome_cliente_local = session.nome_cliente
+            
+            # Formatação dos textos para a resposta
+            artigo_txt = "NÃO, não é necessário entregar Artigo ou TCC" if artigo_val == "Não" else f"SIM, é obrigatório um {artigo_val.upper()}"
+            estagio_txt = "NÃO, o curso não exige Estágio Supervisionado" if estagio_val == "Não" else f"SIM, é obrigatório o Estágio Supervisionado"
+
+            resposta_artigo_estagio = f"""
+Claro, {nome_cliente_local}! Essa é uma informação de conformidade muito importante.
+
+Para o curso de **{session.curso_contexto}**, os requisitos de conclusão são:
+* **Artigo/TCC:** {artigo_txt}.
+* **Estágio Supervisionado:** {estagio_txt}.
+
+Com isso, você já tem certeza dos requisitos acadêmicos. Quer que eu te envie os **valores de investimento** agora? 😉
+"""
+            session.historico.append(ChatMessage(role="assistant", content=resposta_artigo_estagio))
+            salvar_mensagem(session.nome_cliente, "assistant", resposta_artigo_estagio)
+            print("LOG (Python): Resposta forçada de Requisitos (Artigo/Estágio).")
+            return resposta_artigo_estagio, session, None
+            
+    # === ETAPA 1.3: INTERCEPTAR PERGUNTA SOBRE EMENTA (Defensive Bypass) ===
+    if session.curso_contexto and ("grade" in msg_lower or "ementa" in msg_lower):
+        print("LOG (Python): Interceptando pergunta sobre Ementa/Grade (Defensive Bypass).")
+        curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
+        
+        if curso_obj and curso_obj.get('Ementa'):
+            ementa_link = curso_obj.get('Ementa')
+            nome_cliente_local = session.nome_cliente
+            
+            resposta_ementa = f"""
+Ah, sim! A ementa é super importante, {nome_cliente_local}. 😊
+
+Você pode acessar a ementa completa do curso de **{session.curso_contexto}** por este link: {ementa_link}
+
+Dê uma olhadinha com calma e me diga o que achou, combinado?
+"""
+            session.historico.append(ChatMessage(role="assistant", content=resposta_ementa))
+            salvar_mensagem(session.nome_cliente, "assistant", resposta_ementa)
+            print("LOG (Python): Resposta forçada de Ementa/Grade.")
+            return resposta_ementa, session, None
+
+
+    # === INTERCEPTAÇÃO DE NÚMEROS (PRIORIDADE MÁXIMA - BYPASS GEMINI) ===
     match_numero = re.match(r"^(\d+)$", mensagem.strip())
     if match_numero and session.historico and session.historico[-1].role == "assistant":
         try:
@@ -400,18 +487,84 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
             if opcoes:
                 indice_escolhido = int(match_numero.group(1))
                 
+                curso_selecionado_via_numero = None
                 for num_str, nome_curso in opcoes:
                     if int(num_str) == indice_escolhido:
                         curso_selecionado_via_numero = nome_curso.strip()
                         break
                 
                 if curso_selecionado_via_numero:
-                    print(f"LOG (Python): Usuário digitou '{mensagem}' -> Interpretado como: {curso_selecionado_via_numero}")
-                    mensagem = f"Quero saber mais sobre o curso {curso_selecionado_via_numero}"
-                    session.curso_contexto = curso_selecionado_via_numero
+                    print(f"LOG (Python): Usuário digitou '{{mensagem}}' -> Interpretado como seleção de curso: {{curso_selecionado_via_numero}}")
+                    
+                    # 1. Tenta buscar o curso completo imediatamente
+                    curso_obj = buscar_curso_por_nome_exato(curso_selecionado_via_numero, completo=True)
+
+                    if curso_obj:
+                        # LOGS DE DEBUG
+                        print(f"LOG (DEBUG): Curso ID {curso_obj.get('id')} ENCONTRADO com SUCESSO via seleção numérica.")
+                        
+                        session.curso_contexto = curso_selecionado_via_numero
+                        nome_cliente_local = session.nome_cliente
+                        
+                        # 2. Monta o bloco de dados oculto 
+                        _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, nome_cliente_local, resumido=False)
+
+                        # --- GERAÇÃO DA RESPOSTA DETALHADA DIRETO NO PYTHON (ETAPA 5.1) ---
+                        modalidade_txt = curso_obj.get('Modalidade', 'Não Informada')
+                        prazo_txt = curso_obj.get('Prazo de Conclusão', 'Consulte a Duração')
+                        requisito_txt = curso_obj.get('Pré Requesito para Matrícula', 'Não Informado')
+                        carga_horaria_txt = curso_obj.get('Carga Horária', 'Não Informada')
+                        
+                        artigo_val = curso_obj.get('Necessário Artigo?', 'Não Informado')
+                        estagio_val = curso_obj.get('Necessário Estágio?', 'Não Informado')
+                        
+                        artigo_txt = "Sim" if artigo_val == "Sim" else "Não"
+                        estagio_txt = "Sim" if estagio_val == "Sim" else "Não"
+                        
+                        # 3. CONSTRÓI A RESPOSTA CONVERSACIONAL COM DADOS REAIS
+                        resposta_detalhada_python = f"""
+Perfeito, {nome_cliente_local}! 🎓 Você escolheu o curso de **{curso_obj.get('Nome dos cursos')}**.
+                         
+Vou te passar os detalhes acadêmicos:
+* O curso é na modalidade **{modalidade_txt}** e tem duração de **{prazo_txt}**.
+* A **Carga Horária** é de **{carga_horaria_txt}**.
+* O requisito é ter **{requisito_txt}**, e como você já é formado em {session.formacao_cliente or 'Pedagogia'}, se encaixa perfeitamente! 😊
+* Requisitos de conclusão: **Artigo/TCC**: {artigo_txt}. **Estágio**: {estagio_txt}.
+
+Isso se alinha com o que você imaginava para o curso?
+"""
+                        
+                        # 4. Atualiza o histórico (HIDDEN e a resposta)
+                        session.historico.append(ChatMessage(role="assistant", content=f"HIDDEN:{dados_ocultos}"))
+                        session.historico.append(ChatMessage(role="assistant", content=resposta_detalhada_python))
+                        salvar_mensagem(session.nome_cliente, "assistant", resposta_detalhada_python)
+                        print("LOG (Python): Resposta forçada após seleção numérica. Bypassing Gemini call.")
+
+                        return resposta_detalhada_python, session, None
+                    else:
+                         # Se o curso não for achado (DB ou nome errado), damos uma mensagem de erro controlada.
+                         resposta_erro_bypass = f"Ops, {session.nome_cliente}. Não consegui carregar os detalhes do curso que você digitou. Por favor, tente digitar o nome completo do curso ou selecione outra opção."
+                         session.historico.append(ChatMessage(role="assistant", content=resposta_erro_bypass))
+                         salvar_mensagem(session.nome_cliente, "system_error", resposta_erro_bypass)
+                         return resposta_erro_bypass, session, None
+
+            # Se a opção numérica existir, mas o curso não for encontrado (else/except), cairemos aqui
+            # para continuar para o Gemini, que é onde a lista errada é gerada.
+            # O bloco 'else' está ausente, o que faria o fluxo cair direto para o Gemini
         except Exception as e:
-            print(f"LOG (Python): Erro ao tentar interpretar seleção numérica: {e}")
-    # ========================================
+            # Em caso de erro de REGEX ou INT, informamos o usuário.
+            print(f"!!! CRITICAL BYPASS ERROR: {e}") 
+            resposta_erro_critico = f"Desculpe, {session.nome_cliente}. Ocorreu um erro interno ao processar sua escolha numérica. Por favor, tente novamente ou digite o nome completo do curso."
+            session.historico.append(ChatMessage(role="assistant", content=resposta_erro_critico))
+            salvar_mensagem(session.nome_cliente, "system_error", resposta_erro_critico)
+            return resposta_erro_critico, session, None
+
+    # =========================================================================
+    
+    # Se o fluxo forçado não retornou, continuamos para o Gemini.
+    if curso_selecionado_via_numero and not curso_selecionado_via_numero.startswith("Quero saber mais"):
+        mensagem = f"Quero saber mais sobre o curso {curso_selecionado_via_numero}"
+
 
     historico_recente_bot = [msg for msg in session.historico if msg.role == "assistant"]
     
@@ -422,10 +575,13 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
             _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, session.nome_cliente)
             dados_do_contexto = dados_ocultos
         else:
-            print(f"!!! ALERTA (Python): Curso do contexto '{session.curso_contexto}' não achado no DB.")
+            print(f"!!! ALERTA (Python): Curso do contexto '{session.curso_contexto}' não achado no DB. Limpando contexto.")
+            session.curso_contexto = None
 
     if mensagem != "...iniciar...":
+        # ATUALIZA AS ETIQUETAS COM BASE NA ÚLTIMA MENSAGEM DO USUÁRIO
         atualizar_dados_cliente(session, mensagem, historico_recente_bot)
+        # Adiciona a mensagem re-escrita ou original ao histórico da sessão
         session.historico.append(ChatMessage(role="user", content=mensagem))
     
     nome_cliente_local = session.nome_cliente
@@ -508,15 +664,8 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
             termo_principal = match_busca.group(2).strip()
             
             # === BLINDAGEM DE CONTEXTO ===
-            # Se o usuário escolheu via número AGORA (curso_selecionado_via_numero não é None),
-            # FORÇAMOS esse curso a ser o "encontrado", ignorando a busca vaga da IA.
-            if curso_selecionado_via_numero:
-                 print(f"LOG (Python): Seleção numérica detectada '{curso_selecionado_via_numero}'. Ignorando busca vaga e focando neste curso.")
-                 curso_obj = buscar_curso_por_nome_exato(curso_selecionado_via_numero, completo=True)
-                 cursos_encontrados_raw = [curso_obj] if curso_obj else []
-            
             # Se já temos contexto e a busca é redundante, ignoramos
-            elif session.curso_contexto and termo_principal.lower() in session.curso_contexto.lower():
+            if session.curso_contexto and termo_principal.lower() in session.curso_contexto.lower():
                  print("LOG (Python): Busca redundante. Mantendo contexto.")
                  cursos_encontrados_raw = []
             else:
@@ -583,6 +732,15 @@ async def chat_endpoint(request: ChatRequest):
     print(f"\n--- LOG (Python) API: Nova Requisição Recebida ---")
     try:
         resposta_bot, session_atualizada, navegar_para = gerar_resposta_usuario(request.mensagem, request.session)
+        # NOVO LOG PARA ACOMPANHAR A SESSÃO ATUALIZADA
+        print(
+            "LOG (ChatProvider) SESSÃO ATUALIZADA:", 
+            json.dumps({ 
+                "nome": session_atualizada.nome_cliente, 
+                "curso": session_atualizada.curso_contexto,
+                "formacao": session_atualizada.formacao_cliente,
+            })
+        )
         return ChatResponse(
             resposta_bot=resposta_bot,
             session_atualizada=session_atualizada,

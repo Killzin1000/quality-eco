@@ -415,31 +415,47 @@ export type Database = {
           }
         ]
       }
+      // NOVA DEFINIÇÃO CORRIGIDA
       sessoes_usuario: {
         Row: {
+          id: string
           session_id: string
-          user_agent: string | null
-          origem_trafego: string | null
-          converteu: boolean
+          user_id: string | null
+          pagina_inicial: string | null
+          pagina_final: string | null
           tempo_total_segundos: number
+          paginas_visitadas: number
+          converteu: boolean
+          dispositivo: string | null
+          navegador: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
+          id?: string
           session_id: string
-          user_agent?: string | null
-          origem_trafego?: string | null
-          converteu?: boolean
+          user_id?: string | null
+          pagina_inicial?: string | null
+          pagina_final?: string | null
           tempo_total_segundos?: number
+          paginas_visitadas?: number
+          converteu?: boolean
+          dispositivo?: string | null
+          navegador?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
+          id?: string
           session_id?: string
-          user_agent?: string | null
-          origem_trafego?: string | null
-          converteu?: boolean
+          user_id?: string | null
+          pagina_inicial?: string | null
+          pagina_final?: string | null
           tempo_total_segundos?: number
+          paginas_visitadas?: number
+          converteu?: boolean
+          dispositivo?: string | null
+          navegador?: string | null
           created_at?: string
           updated_at?: string
         }

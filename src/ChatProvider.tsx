@@ -145,7 +145,14 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       
       // Atualiza a sessão com a resposta do bot
       setSession(data.session_atualizada);
-      console.log("LOG (ChatProvider): Resposta recebida da API.");
+      console.log(
+        "LOG (ChatProvider) SESSÃO ATUALIZADA:", 
+        JSON.stringify({ 
+          nome: data.session_atualizada.nome_cliente, 
+          curso: data.session_atualizada.curso_contexto,
+          formacao: data.session_atualizada.formacao_cliente,
+        })
+      ); // <-- NOVO LOG AQUI
 
       // ***** A MÁGICA DA NAVEGAÇÃO ACONTECE AQUI *****
       if (data.navegar_para) {

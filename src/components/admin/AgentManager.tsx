@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Save, Edit2, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils"; // <--- O ERRO ESTAVA AQUI (Faltava essa linha)
+import { cn } from "@/lib/utils"; 
 
 const promptSchema = z.object({
   id: z.string().uuid().optional().nullable(),
@@ -71,6 +71,34 @@ export const AgentManager = () => {
     }
   };
 
+  // --- NOVA FUNÇÃO PARA RECARREGAR PROMPTS NO BACKEND ---
+  const refreshPrompts = async () => {
+    // URL do endpoint que força o recarregamento dos prompts (no seu bot_api.py)
+    const REFRESH_URL = "http://127.0.0.1:8000/refresh-prompts";
+    console.log("LOG (AgentManager): Chamando endpoint para recarregar prompts no servidor Python...");
+    
+    try {
+      const response = await fetch(REFRESH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error("Falha ao notificar o backend para recarregar prompts.");
+      }
+      toast.success("Configurações da IA Recarregadas!", {
+        description: "O Agente de IA está usando os novos módulos de prompt imediatamente.",
+      });
+    } catch (error) {
+      console.error("Erro ao recarregar prompts no servidor:", error);
+      toast.warning("Aviso: Falha ao recarregar prompts.", {
+        description: "Reinicie o servidor Python manualmente para garantir que as mudanças sejam aplicadas.",
+      });
+    }
+  };
+  // --------------------------------------------------------
+
+
   useEffect(() => {
     fetchPrompts();
   }, []);
@@ -92,6 +120,11 @@ export const AgentManager = () => {
       toast.error("Erro ao salvar.", { description: error.message });
     } else {
       toast.success(values.id ? "Prompt atualizado!" : "Novo prompt criado!");
+      
+      // --- CHAMADA PARA RECARREGAR O SERVIDOR ---
+      await refreshPrompts(); 
+      // ------------------------------------------
+
       resetForm();
       fetchPrompts();
     }
