@@ -66,7 +66,6 @@ export type Database = {
         }
         Relationships: []
       }
-      // === NOVA TABELA DE LEADS DE CHAT ===
       leads_chat: {
         Row: {
           id: string
@@ -106,7 +105,6 @@ export type Database = {
         }
         Relationships: []
       }
-      // ======================================
       avaliacoes: {
         Row: {
           comentario: string
@@ -291,6 +289,7 @@ export type Database = {
         }
         Relationships: []
       }
+      // === ATUALIZADO: TABELA MATRICULAS ===
       matriculas: {
         Row: {
           aluno_cpf: string
@@ -298,7 +297,8 @@ export type Database = {
           aluno_nome: string
           aluno_telefone: string
           created_at: string
-          curso_id: number
+          curso_id: number | null // Agora opcional
+          pacote_id: string | null // Novo campo
           forma_pagamento: string
           id: string
           valor_pago: string
@@ -309,7 +309,8 @@ export type Database = {
           aluno_nome: string
           aluno_telefone: string
           created_at?: string
-          curso_id: number
+          curso_id?: number | null
+          pacote_id?: string | null
           forma_pagamento: string
           id?: string
           valor_pago: string
@@ -320,7 +321,8 @@ export type Database = {
           aluno_nome?: string
           aluno_telefone?: string
           created_at?: string
-          curso_id?: number
+          curso_id?: number | null
+          pacote_id?: string | null
           forma_pagamento?: string
           id?: string
           valor_pago?: string
@@ -328,6 +330,93 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "matriculas_curso_id_fkey"
+            columns: ["curso_id"]
+            isOneToOne: false
+            referencedRelation: "cursos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matriculas_pacote_id_fkey"
+            columns: ["pacote_id"]
+            isOneToOne: false
+            referencedRelation: "pacotes"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      // === NOVA TABELA: PACOTES ===
+      pacotes: {
+        Row: {
+          id: string
+          titulo: string
+          descricao: string | null
+          preco_pix: string | null
+          preco_cartao: string | null
+          regras: Json | null
+          imagem_capa: string | null
+          ativo: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          titulo: string
+          descricao?: string | null
+          preco_pix?: string | null
+          preco_cartao?: string | null
+          regras?: Json | null
+          imagem_capa?: string | null
+          ativo?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          titulo?: string
+          descricao?: string | null
+          preco_pix?: string | null
+          preco_cartao?: string | null
+          regras?: Json | null
+          imagem_capa?: string | null
+          ativo?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      // === NOVA TABELA: MATRICULA_ITENS ===
+      matricula_itens: {
+        Row: {
+          id: string
+          matricula_id: string
+          curso_id: number | null
+          tipo_item: string | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          matricula_id: string
+          curso_id?: number | null
+          tipo_item?: string | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          matricula_id?: string
+          curso_id?: number | null
+          tipo_item?: string | null
+          status?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matricula_itens_matricula_id_fkey"
+            columns: ["matricula_id"]
+            isOneToOne: false
+            referencedRelation: "matriculas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matricula_itens_curso_id_fkey"
             columns: ["curso_id"]
             isOneToOne: false
             referencedRelation: "cursos"

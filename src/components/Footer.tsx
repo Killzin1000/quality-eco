@@ -26,6 +26,11 @@ export const Footer = () => {
             <h4 className="font-semibold mb-4">Cursos</h4>
             <ul className="space-y-2">
               <li>
+                <Link to="/combos" className="text-sm font-bold text-accent hover:text-accent-light transition-smooth">
+                  Combos & Promoções 🔥
+                </Link>
+              </li>
+              <li>
                 <Link to="/cursos?modalidade=EaD" className="text-sm text-primary-foreground/80 hover:text-accent transition-smooth">
                   Cursos EaD
                 </Link>

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Search, ShoppingCart, Menu, BookOpen } from "lucide-react";
+import { Search, Menu, BookOpen } from "lucide-react"; // Removido ShoppingCart se não usar
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
@@ -13,9 +13,8 @@ import {
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { useSearch } from "@/SearchProvider"; // <-- CORRIGIDO AQUI (removido o /context)
+import { useSearch } from "@/SearchProvider";
 
-// Definindo o tipo para os resultados da busca
 interface SearchResult {
   id: number;
   "Nome dos cursos": string | null;
@@ -33,7 +32,6 @@ export const Navbar = () => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpenSearch(true);
-        console.log("LOG (Navbar): Atalho Ctrl+K acionado, abrindo busca.");
       }
     };
     document.addEventListener("keydown", down);
@@ -47,12 +45,9 @@ export const Navbar = () => {
       return;
     }
 
-    console.log(`LOG (Navbar): Query alterada: "${searchQuery}". Aguardando debounce...`);
     setLoading(true);
 
     const timer = setTimeout(() => {
-      console.log(`LOG (Navbar): Debounce finalizado. Buscando no Supabase por: "${searchQuery}"`);
-      
       const performSearch = async () => {
         try {
           const { data, error } = await supabase
@@ -62,8 +57,6 @@ export const Navbar = () => {
             .limit(5);
 
           if (error) throw error;
-          
-          console.log(`LOG (Navbar): Busca retornou ${data?.length || 0} resultados.`);
           setResults(data || []);
 
         } catch (error: any) {
@@ -78,13 +71,11 @@ export const Navbar = () => {
     }, 300);
 
     return () => {
-      console.log("LOG (Navbar): Limpando timer (usuário digitou novamente).");
       clearTimeout(timer);
     };
   }, [searchQuery]);
 
   const handleSelectResult = (id: number) => {
-    console.log(`LOG (Navbar): Resultado ${id} selecionado. Navegando...`);
     navigate(`/curso/${id}`);
     setOpenSearch(false);
     setSearchQuery("");
@@ -111,10 +102,7 @@ export const Navbar = () => {
               <Button
                 variant="outline"
                 className="w-full justify-start text-muted-foreground"
-                onClick={() => {
-                  console.log("LOG (Navbar): Botão de busca clicado.");
-                  setOpenSearch(true)
-                }}
+                onClick={() => setOpenSearch(true)}
               >
                 <Search className="h-4 w-4 mr-2" />
                 Buscar cursos...
@@ -127,13 +115,13 @@ export const Navbar = () => {
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-6">
               <Link to="/cursos" className="text-sm font-medium text-foreground hover:text-primary transition-smooth">
-                Todos os Cursos
+                Cursos
+              </Link>
+              <Link to="/combos" className="text-sm font-bold text-accent hover:text-accent-foreground transition-smooth flex items-center gap-1">
+                Combos 🔥
               </Link>
               <Link to="/cursos?modalidade=EaD" className="text-sm font-medium text-foreground hover:text-primary transition-smooth">
                 EaD
-              </Link>
-              <Link to="/cursos?modalidade=Presencial" className="text-sm font-medium text-foreground hover:text-primary transition-smooth">
-                Presenciais
               </Link>
               <Link to="/admin" className="text-sm font-medium text-foreground hover:text-primary transition-smooth">
                 Admin
@@ -153,10 +141,7 @@ export const Navbar = () => {
                   <Button
                     variant="outline"
                     className="w-full justify-start text-muted-foreground"
-                    onClick={() => {
-                      console.log("LOG (Navbar Mobile): Botão de busca clicado.");
-                      setOpenSearch(true)
-                    }}
+                    onClick={() => setOpenSearch(true)}
                   >
                     <Search className="h-4 w-4 mr-2" />
                     Buscar cursos...
@@ -165,11 +150,11 @@ export const Navbar = () => {
                   <Link to="/cursos" className="text-lg font-medium text-foreground hover:text-primary transition-smooth">
                     Todos os Cursos
                   </Link>
+                  <Link to="/combos" className="text-lg font-bold text-accent hover:text-accent-foreground transition-smooth">
+                    Combos Promocionais 🔥
+                  </Link>
                   <Link to="/cursos?modalidade=EaD" className="text-lg font-medium text-foreground hover:text-primary transition-smooth">
                     Cursos EaD
-                  </Link>
-                  <Link to="/cursos?modalidade=Presencial" className="text-lg font-medium text-foreground hover:text-primary transition-smooth">
-                    Cursos Presenciais
                   </Link>
                   <Link to="/admin" className="text-lg font-medium text-foreground hover:text-primary transition-smooth">
                     Painel Admin
@@ -181,24 +166,18 @@ export const Navbar = () => {
         </div>
       </nav>
 
-      {/* O Modal de Busca (CommandDialog) */}
+      {/* Modal de Busca */}
       <CommandDialog open={openSearch} onOpenChange={setOpenSearch}>
         <CommandInput
-          placeholder="Digite 3+ letras para buscar um curso..."
+          placeholder="Digite 3+ letras para buscar..."
           value={searchQuery}
           onValueChange={setSearchQuery}
         />
         <CommandList>
-          {loading && (
-            <CommandEmpty>Buscando...</CommandEmpty>
-          )}
+          {loading && <CommandEmpty>Buscando...</CommandEmpty>}
           {!loading && !results.length && searchQuery.length >= 3 && (
             <CommandEmpty>Nenhum resultado encontrado.</CommandEmpty>
           )}
-           {!loading && !results.length && searchQuery.length < 3 && (
-            <CommandEmpty>Digite ao menos 3 letras para iniciar a busca.</CommandEmpty>
-          )}
-
           {!loading && results.length > 0 && (
             <CommandGroup heading="Cursos Encontrados">
               {results.map((curso) => (

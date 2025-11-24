@@ -7,9 +7,10 @@ import { WhatsAppButton } from "@/components/WhatsAppButton";
 import { CourseCard } from "@/components/CourseCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, GraduationCap, Monitor, Users, ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge"; // <--- A CORREÇÃO ESTÁ AQUI
+import { Search, GraduationCap, Monitor, Users, ArrowRight, Gift } from "lucide-react";
 import { toast } from "sonner";
-import { useSearch } from "@/SearchProvider"; // <-- CORRIGIDO AQUI (removido o /context)
+import { useSearch } from "@/SearchProvider";
 
 interface Curso {
   id: number;
@@ -33,7 +34,6 @@ const Home = () => {
   }, []);
 
   const fetchCursos = async () => {
-    console.log("LOG (Home): Buscando cursos em destaque...");
     try {
       const { data, error } = await supabase
         .from("cursos")
@@ -67,7 +67,7 @@ const Home = () => {
               Cursos superiores EaD e presenciais reconhecidos pelo MEC
             </p>
             
-            {/* Search Bar (gatilho) */}
+            {/* Search Bar */}
             <div className="flex gap-2 max-w-2xl mx-auto">
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -75,31 +75,20 @@ const Home = () => {
                   type="search"
                   placeholder="Buscar por curso ou área..."
                   className="pl-12 h-14 text-lg bg-background/95 backdrop-blur cursor-pointer"
-                  onFocus={() => {
-                    console.log("LOG (Home): Foco no input do Hero, abrindo busca.");
-                    setOpenSearch(true);
-                  }}
-                  onClick={() => {
-                    console.log("LOG (Home): Clique no input do Hero, abrindo busca.");
-                    setOpenSearch(true);
-                  }}
+                  onFocus={() => setOpenSearch(true)}
+                  onClick={() => setOpenSearch(true)}
                   readOnly
                 />
               </div>
               <Button 
                 size="lg" 
                 className="h-14 px-8 bg-accent hover:bg-accent-light text-accent-foreground font-semibold"
-                onClick={() => {
-                  console.log("LOG (Home): Botão 'Buscar' do Hero clicado, abrindo busca.");
-                  setOpenSearch(true);
-                }}
+                onClick={() => setOpenSearch(true)}
               >
                 Buscar
               </Button>
             </div>
 
-
-            {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" asChild variant="secondary" className="text-lg h-12">
                 <Link to="/cursos">
@@ -129,6 +118,40 @@ const Home = () => {
               <Users className="h-12 w-12 mx-auto mb-3 text-primary" />
               <p className="text-3xl font-bold text-foreground">10.000+</p>
               <p className="text-muted-foreground">Alunos matriculados</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* SEÇÃO DE COMBOS (NOVA) */}
+      <section className="py-12 bg-accent/10 border-b border-accent/20">
+        <div className="container mx-auto px-4">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-8 bg-background p-8 rounded-2xl shadow-sm border border-accent/20">
+            <div className="space-y-4 max-w-2xl">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="bg-accent/20 text-accent-foreground hover:bg-accent/30">
+                  NOVIDADE
+                </Badge>
+                <span className="text-sm font-semibold text-muted-foreground tracking-wide uppercase">
+                  Economia Inteligente
+                </span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-bold text-primary">
+                Combos & Pacotes Especiais
+              </h2>
+              <p className="text-lg text-muted-foreground">
+                Quer fazer mais de um curso? Monte seu combo de Licenciaturas ou Pós-Graduação e economize até 50% no valor total.
+              </p>
+              <Button size="lg" className="bg-accent hover:bg-accent-light text-accent-foreground" asChild>
+                <Link to="/combos">
+                  <Gift className="mr-2 h-5 w-5" />
+                  Ver Pacotes Disponíveis
+                </Link>
+              </Button>
+            </div>
+            {/* Ilustração Visual (Opcional) */}
+            <div className="hidden md:flex items-center justify-center">
+              <Gift className="h-32 w-32 text-accent opacity-20" />
             </div>
           </div>
         </div>

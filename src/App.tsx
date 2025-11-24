@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import { SearchProvider } from "@/SearchProvider"; 
 import { ChatProvider } from "@/ChatProvider"; // <-- CORRIGIDO AQUI (removido o /context)
+import Packages from "./pages/Packages";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
               <Route path="/checkout/:id" element={<Checkout />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/combos" element={<Packages />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </ChatProvider>
