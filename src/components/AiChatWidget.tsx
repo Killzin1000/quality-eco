@@ -60,7 +60,7 @@ export const AiChatWidget = () => {
                 className={cn(
                   "rounded-2xl px-4 py-3 shadow-sm text-sm",
                   "max-w-[85%]", // Limite de largura
-                  "whitespace-pre-wrap", // Mantém quebras de linha mas permite wrapping
+                  // REMOVIDO: "whitespace-pre-wrap" -> Isso causava os buracos se houvesse indentação
                   msg.role === "user"
                     ? "bg-primary text-primary-foreground rounded-br-none"
                     : "bg-muted text-muted-foreground rounded-bl-none border border-border"
@@ -70,11 +70,11 @@ export const AiChatWidget = () => {
                 <div 
                   dangerouslySetInnerHTML={{ 
                     __html: msg.content
-                      .replace(/\n/g, '<br />')
-                      // REGEX para converter [label](link) em <a href="link" target="_blank">label</a>
-                      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>') // <--- FIX NOVO
+                      .replace(/\n/g, '<br />') // Mantemos a quebra de linha manual
+                      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="underline decoration-dotted hover:text-primary">$1</a>')
                   }} 
-                  className="leading-relaxed w-full break-all"
+                  // ALTERADO: de 'break-all' para 'break-words' (quebra palavras só se necessário)
+                  className="leading-relaxed w-full break-words" 
                 />
               </div>
 

@@ -470,7 +470,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
 Claro, {nome_cliente_local}! A carga horária total para o curso de **{session.curso_contexto}** é de **{carga_horaria_txt}**.
 
 Isso se encaixa no que você precisa para sua certificação ou evolução funcional? 😉
-"""
+""".strip()
             session.historico.append(ChatMessage(role="assistant", content=resposta_cargahoraria))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_cargahoraria)
             print(f"LOG (Python): Resposta forçada de Carga Horária: {carga_horaria_txt}")
@@ -486,19 +486,27 @@ Isso se encaixa no que você precisa para sua certificação ou evolução funci
             estagio_val = curso_obj.get('Necessário Estágio?', 'Não Informado')
             nome_cliente_local = session.nome_cliente
             
-            # Formatação dos textos para a resposta
-            artigo_txt = "NÃO, não é necessário entregar Artigo ou TCC" if artigo_val == "Não" else f"SIM, é obrigatório um {artigo_val.upper()}"
-            estagio_txt = "NÃO, o curso não exige Estágio Supervisionado" if estagio_val == "Não" else f"SIM, é obrigatório o Estágio Supervisionado"
+            # Lógica de Texto Melhorada
+            if artigo_val == "Sim":
+                artigo_txt = "SIM. É um Artigo de Conclusão simples (12 a 16 páginas), sem apresentação em banca"
+            else:
+                artigo_txt = "NÃO. Este curso não exige entrega de Artigo ou TCC"
+
+            if estagio_val == "Sim":
+                estagio_txt = "SIM. O Estágio Supervisionado é obrigatório para a certificação"
+            else:
+                estagio_txt = "NÃO. O curso não exige cumprimento de horas de estágio"
 
             resposta_artigo_estagio = f"""
-Claro, {nome_cliente_local}! Essa é uma informação muito importante para sua organização.
+{nome_cliente_local}! Sobre os requisitos acadêmicos do curso de **{session.curso_contexto}**:
 
-Para o curso de **{session.curso_contexto}**, os requisitos são:
-* **Artigo/TCC:** {artigo_txt}.
-* **Estágio Supervisionado:** {estagio_txt}.
+* 📝 **TCC/Artigo:** {artigo_txt}.
+* 💼 **Estágio:** {estagio_txt}.
 
-O que achou dessa estrutura? Ficou mais alguma dúvida sobre a parte pedagógica? 😊
-"""
+No caso do Artigo, fique tranquilo: temos modelos prontos e tutoria para ajudar!
+Isso tira sua dúvida ou gostaria de saber mais sobre a metodologia? 😊
+""".strip()
+            
             session.historico.append(ChatMessage(role="assistant", content=resposta_artigo_estagio))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_artigo_estagio)
             print("LOG (Python): Resposta forçada de Requisitos (Artigo/Estágio).")

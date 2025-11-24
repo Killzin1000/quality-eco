@@ -68,7 +68,8 @@ export const WhatsAppButton = ({ courseContext }: WhatsAppButtonProps) => {
         <DrawerTrigger asChild>
           {ChatTriggerButton}
         </DrawerTrigger>
-        <DrawerContent className="h-[85vh] max-h-[700px] z-40">
+        {/* CORREÇÃO AQUI: Mudamos z-40 para z-[60] para ficar acima do Overlay (z-50) */}
+        <DrawerContent className="h-[85vh] max-h-[700px] z-[60] flex flex-col focus-visible:outline-none">
           {ChatContent}
         </DrawerContent>
       </Drawer>
