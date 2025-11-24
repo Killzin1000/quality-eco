@@ -29,8 +29,8 @@ except Exception as e:
     model = None
 
 configuracao_geracao = genai.GenerationConfig(
-    temperature=0.5, # Mantendo 0.5 para mais humanidade
-    top_p=0.8,
+    temperature=0.8, # AUMENTADO para 0.8 para mais humanidade
+    top_p=0.9,       # Leve ajuste para vocabulário mais rico
     top_k=40
 )
 
@@ -50,6 +50,7 @@ app.add_middleware(
 )
 # ==========================================================
 
+
 # === MODELOS DE DADOS ===
 class ChatMessage(BaseModel):
     role: str
@@ -57,6 +58,7 @@ class ChatMessage(BaseModel):
 
 class ChatSession(BaseModel):
     nome_cliente: str = "visitante"
+    telefone_cliente: Optional[str] = None  # <--- CAMPO NOVO PARA TELEFONE
     formacao_cliente: Optional[str] = None
     tipo_formacao: Optional[str] = None
     area_preferencial: Optional[str] = None
@@ -125,6 +127,7 @@ def salvar_lead_chat(session: ChatSession):
         data_to_upsert = {
             "session_id": session_identifier,
             "nome": nome_lead,
+            "telefone": session.telefone_cliente, # <--- ENVIA TELEFONE PARA O DB
             "formacao": session.formacao_cliente,
             "area_preferencial": session.area_preferencial,
             "curso_contexto": session.curso_contexto,
@@ -363,19 +366,36 @@ def atualizar_dados_cliente(session: ChatSession, mensagem_usuario: str, histori
         
     etiqueta_atualizada = False
     
+    # --- 1. CAPTURA DE TELEFONE (NOVO) ---
+    # Procura padrões como (11) 99999-9999, 11 999999999, etc.
+    match_telefone = re.search(r'\(?\d{2}\)?\s?9?\d{4}[-.\s]?\d{4}', mensagem_usuario)
+    if match_telefone:
+        telefone_encontrado = match_telefone.group(0)
+        # Só atualiza se ainda não tivermos ou se for diferente
+        if session.telefone_cliente != telefone_encontrado:
+            session.telefone_cliente = telefone_encontrado
+            etiqueta_atualizada = True
+            print(f"LOG (Python): Telefone capturado: {telefone_encontrado}")
+
+    # --- 2. CAPTURA DE NOME (JÁ EXISTENTE) ---
     if session.nome_cliente == "visitante":
-        match_nome = re.search(r"(?:me chamo|meu nome é|sou o|sou)\s+([a-zA-Záéíóúâêôãõç]{3,})", msg_lower)
+        match_nome = re.search(r"(?:me chamo|meu nome é|sou o|sou|nome é)\s+([a-zA-Záéíóúâêôãõç]{3,})", msg_lower)
         if match_nome:
             nome = match_nome.group(1).capitalize()
-            if nome.lower() not in ["formado", "licenciado", "graduado", "bacharel", "tecnólogo"]:
+            ignored_words = ["formado", "licenciado", "graduado", "bacharel", "tecnólogo", "um", "uma"]
+            if nome.lower() not in ignored_words:
                 session.nome_cliente = nome
                 etiqueta_atualizada = True
+        # Lógica de fallback para nome curto
         elif "seu nome?" in last_bot_msg and len(mensagem_usuario.split()) <= 3:
              nome_extraido = mensagem_usuario.strip().title()
-             if nome_extraido.lower() not in ["olá", "oi", "sou", "tenho", "formado", "bacharel", "licenciado", "tecnólogo", "tudo", "bom", "claro", "sim"]:
+             # Lista de palavras proibidas para evitar falsos positivos
+             blacklist = ["olá", "oi", "sou", "tenho", "formado", "bacharel", "licenciado", "tecnólogo", "tudo", "bom", "claro", "sim", "não"]
+             if nome_extraido.lower() not in blacklist and not any(char.isdigit() for char in nome_extraido):
                 session.nome_cliente = nome_extraido
                 etiqueta_atualizada = True
 
+    # --- 3. CAPTURA DE FORMAÇÃO (JÁ EXISTENTE) ---
     if ("graduação" in last_bot_msg or "licenciatura" in last_bot_msg or "formação" in last_bot_msg) and \
        ("formado em" in msg_lower or "licenciado em" in msg_lower or "tenho" in msg_lower or "sou" in msg_lower or "bacharel" in msg_lower or "tecnólogo" in msg_lower) and \
        len(mensagem_usuario.split()) < 15:
@@ -449,7 +469,7 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
             resposta_cargahoraria = f"""
 Claro, {nome_cliente_local}! A carga horária total para o curso de **{session.curso_contexto}** é de **{carga_horaria_txt}**.
 
-Mais alguma dúvida sobre os detalhes acadêmicos? Caso contrário, podemos falar sobre os valores de investimento! 😉
+Isso se encaixa no que você precisa para sua certificação ou evolução funcional? 😉
 """
             session.historico.append(ChatMessage(role="assistant", content=resposta_cargahoraria))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_cargahoraria)
@@ -471,13 +491,13 @@ Mais alguma dúvida sobre os detalhes acadêmicos? Caso contrário, podemos fala
             estagio_txt = "NÃO, o curso não exige Estágio Supervisionado" if estagio_val == "Não" else f"SIM, é obrigatório o Estágio Supervisionado"
 
             resposta_artigo_estagio = f"""
-Claro, {nome_cliente_local}! Essa é uma informação de conformidade muito importante.
+Claro, {nome_cliente_local}! Essa é uma informação muito importante para sua organização.
 
-Para o curso de **{session.curso_contexto}**, os requisitos de conclusão são:
+Para o curso de **{session.curso_contexto}**, os requisitos são:
 * **Artigo/TCC:** {artigo_txt}.
 * **Estágio Supervisionado:** {estagio_txt}.
 
-Com isso, você já tem certeza dos requisitos acadêmicos. Quer que eu te envie os **valores de investimento** agora? 😉
+O que achou dessa estrutura? Ficou mais alguma dúvida sobre a parte pedagógica? 😊
 """
             session.historico.append(ChatMessage(role="assistant", content=resposta_artigo_estagio))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_artigo_estagio)
@@ -651,6 +671,7 @@ Isso se alinha com o que você imaginava para o curso?
 ---
 🧠 **PERFIL DO CLIENTE (Etiquetas Obrigatórias)**
 - **Nome:** {session.nome_cliente}
+- **Telefone:** {session.telefone_cliente if session.telefone_cliente else 'Ainda não informado'}
 - **Formação:** {session.formacao_cliente if session.formacao_cliente else 'Ainda não informado'}
 - **Tipo de Formação:** {session.tipo_formacao if session.tipo_formacao else 'Ainda não informado'}
 - **Área Preferencial:** {session.area_preferencial if session.area_preferencial else 'Ainda não definida'}
@@ -798,6 +819,7 @@ async def chat_endpoint(request: ChatRequest):
             "LOG (ChatProvider) SESSÃO ATUALIZADA:", 
             json.dumps({ 
                 "nome": session_atualizada.nome_cliente, 
+                "telefone": session_atualizada.telefone_cliente, # NOVO LOG
                 "curso": session_atualizada.curso_contexto,
                 "formacao": session_atualizada.formacao_cliente,
             })
@@ -823,4 +845,4 @@ def root(): return {"status": "API do Bot ESP (v5.3 - Name Fix) está online!"}
 if __name__ == "__main__":
     carregar_prompts_do_supabase()
     print("LOG (Python): Iniciando servidor FastAPI localmente na porta 8000...")
-    uvicorn.run("bot_api:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("bot_api:app", host="0.0.0.0", port=8000, reload=True)
