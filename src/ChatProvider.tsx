@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom"; // Importa hooks de
 import { toast } from "sonner";
 
 // Substitua o 192.168.X.X pelo número que você pegou no ipconfig
-const API_URL = "http://192.168.0.4:8000/chat";
+const API_URL = "/api/chat";
 
 // 1. Define as estruturas (espelhando o Python)
 interface ChatMessage {
