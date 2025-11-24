@@ -76,24 +76,29 @@ export const WhatsAppButton = ({ courseContext }: WhatsAppButtonProps) => {
     );
   }
 
+  
   return (
-    <Popover open={isOpen} onOpenChange={toggleChat}>
-      <PopoverTrigger asChild>
-        {ChatTriggerButton}
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="end"
-        className={cn(
-          "w-[400px] h-[600px] z-40 p-0 mr-4 mb-2 overflow-hidden",
-          "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-          "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          "data-[side=top]:slide-in-from-bottom-2 data-[side=bottom]:slide-in-from-top-2"
-        )}
-      >
-        {ChatContent}
-      </PopoverContent>
-    </Popover>
-  );
-};
+      <Popover open={isOpen} onOpenChange={toggleChat}>
+        <PopoverTrigger asChild>
+          {ChatTriggerButton}
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="end"
+          className={cn(
+            // ALTERAÇÃO AQUI:
+            // 1. Mudamos w-[400px] para w-[380px] (um pouco mais elegante)
+            // 2. Mudamos h-[600px] para h-[500px] (altura base menor)
+            // 3. Adicionamos max-h-[80vh] (TRAVA DE SEGURANÇA: nunca passa de 80% da tela)
+            "w-[380px] h-[500px] max-h-[80vh] z-40 p-0 mr-4 mb-2 overflow-hidden shadow-2xl border border-border/50",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+            "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            "data-[side=top]:slide-in-from-bottom-2 data-[side=bottom]:slide-in-from-top-2"
+          )}
+        >
+          {ChatContent}
+        </PopoverContent>
+      </Popover>
+    );
+  };
