@@ -5,20 +5,24 @@ from typing import Tuple, List, Optional, Dict
 from supabase import create_client, Client
 import google.generativeai as genai
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import uvicorn
+# uvicorn não é estritamente necessário importar no topo para o Vercel rodar, mas mantemos para local
 
 # === CONFIGURAÇÕES E INICIALIZAÇÃO DE CLIENTES ===
 print("LOG (Python): Carregando variáveis de ambiente...")
 load_dotenv()
+# No Vercel, estas variáveis devem estar configuradas nas Settings do projeto
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Conexões
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    print(f"ERRO CRÍTICO (Python): Falha ao conectar Supabase: {e}")
 
 try:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -29,8 +33,8 @@ except Exception as e:
     model = None
 
 configuracao_geracao = genai.GenerationConfig(
-    temperature=0.8, # AUMENTADO para 0.8 para mais humanidade
-    top_p=0.9,       # Leve ajuste para vocabulário mais rico
+    temperature=0.8, 
+    top_p=0.9,       
     top_k=40
 )
 
@@ -38,18 +42,18 @@ PROMPTS_MODULARES: Dict[str, str] = {}
 PROMPTS_CARREGADOS = False
 
 # ==========================================================
-# === CORREÇÃO: INICIALIZAÇÃO DO APP FASTAPI E CORS ===
+# === INICIALIZAÇÃO DO APP FASTAPI ===
 app = FastAPI()
 
+# Configuração de CORS para aceitar seu domínio da Vercel
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Permite acesso do seu frontend (Vite/React)
+    allow_origins=["*"], # Pode restringir para ["https://quality-eco.vercel.app"] em produção
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 # ==========================================================
-
 
 # === MODELOS DE DADOS ===
 class ChatMessage(BaseModel):
@@ -58,7 +62,7 @@ class ChatMessage(BaseModel):
 
 class ChatSession(BaseModel):
     nome_cliente: str = "visitante"
-    telefone_cliente: Optional[str] = None  # <--- CAMPO NOVO PARA TELEFONE
+    telefone_cliente: Optional[str] = None
     formacao_cliente: Optional[str] = None
     tipo_formacao: Optional[str] = None
     area_preferencial: Optional[str] = None
@@ -102,7 +106,6 @@ def carregar_prompts_do_supabase() -> bool:
         return False
 
 def salvar_mensagem(session_id: str, role: str, content: str):
-    """Salva uma mensagem individual na tabela chat_messages do Supabase"""
     try:
         content_to_save = content.replace("HIDDEN:", "")
         supabase.table("chat_messages").insert({
@@ -114,20 +117,14 @@ def salvar_mensagem(session_id: str, role: str, content: str):
         print(f"!!! ERRO AO SALVAR MENSAGEM NO DB: {e}")
 
 def salvar_lead_chat(session: ChatSession):
-    """Realiza UPSERT na tabela leads_chat com os dados da sessão."""
     try:
-        # O session_id para o DB é sempre o nome_cliente.
-        # Se for "visitante", ele usa o ID de sessão único gerado pelo frontend.
         session_identifier = session.nome_cliente 
-        
-        # O nome real do lead só é salvo se for diferente de 'visitante'
         nome_lead = session.nome_cliente if session.nome_cliente != "visitante" else None
         
-        # Construindo o payload para UPSERT
         data_to_upsert = {
             "session_id": session_identifier,
             "nome": nome_lead,
-            "telefone": session.telefone_cliente, # <--- ENVIA TELEFONE PARA O DB
+            "telefone": session.telefone_cliente,
             "formacao": session.formacao_cliente,
             "area_preferencial": session.area_preferencial,
             "curso_contexto": session.curso_contexto,
@@ -136,11 +133,8 @@ def salvar_lead_chat(session: ChatSession):
         
         supabase.table("leads_chat").upsert(
             data_to_upsert,
-            on_conflict="session_id" # Chave para identificar e atualizar o registro
+            on_conflict="session_id"
         ).execute()
-        
-        print(f"LOG (Lead Save): Lead para '{session_identifier}' atualizado/salvo com sucesso.")
-        
     except Exception as e:
         print(f"!!! ERRO AO SALVAR LEAD NO DB: {e}")
 
@@ -229,51 +223,36 @@ def buscar_curso_por_nome_exato(nome_curso: str, completo: bool = False) -> Opti
 def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Optional[str] = None) -> str:
     global PROMPTS_MODULARES
     
-    # 1. Busca dos prompts fixos
     prompt_persona = PROMPTS_MODULARES.get('persona', "Você é um assistente.")
     prompt_regras = PROMPTS_MODULARES.get('regras_gerais', "Seja educado.")
     prompt_etapas = PROMPTS_MODULARES.get('etapas_atendimento', "Responda o cliente.")
     prompt_objecoes = PROMPTS_MODULARES.get('regras_objecoes', "Tente reverter a objeção.")
     prompt_elegibilidade = PROMPTS_MODULARES.get('regras_elegibilidade', "")
     
-    # Lista de chaves já tratadas (para evitar duplicação no loop)
     chaves_excluidas = ['persona', 'regras_gerais', 'etapas_atendimento', 'regras_objecoes', 'regras_elegibilidade', 'prompt_navegacao', 'prompt_finalizacao']
     
-    # 2. Inclusão dinâmica dos prompts restantes
     prompts_dinamicos = ""
     for chave, conteudo in PROMPTS_MODULARES.items():
         if chave not in chaves_excluidas:
-            # Adiciona o título do módulo no corpo do prompt para ajudar a IA a priorizar
             prompts_dinamicos += f"\n--- MÓDULO: {chave.upper()} ---\n{conteudo}\n"
 
-    # Prompts de controle do sistema
     prompt_navegacao = """
 ---
 ### 8. REGRA DE NAVEGAÇÃO
-- Se o cliente pedir para "ir para a página do curso", "ver o curso", "me matricular" ou "quero comprar", e você souber DE QUAL CURSO ele está falando (seja pelo 'Contexto de Página' ou por um `[DADOS_CURSO_ENCONTRADO]` no histórico):
-- Responda de forma afirmativa (ex: "Claro, estou te redirecionando...") E ADICIONE a tag `[NAVEGAR_PARA]` na última linha.
+- Se o cliente pedir para "ir para a página do curso", "ver o curso", "me matricular" ou "quero comprar", e você souber DE QUAL CURSO ele está falando:
+- Responda de forma afirmativa e ADICIONE a tag `[NAVEGAR_PARA]` na última linha.
 ---
 """
     
     prompt_finalizacao = """
 ---
-### 9. REGRA DE OURO: FIDELIDADE AOS DADOS (CRÍTICO!)
-- **ATENÇÃO MÁXIMA:** Use APENAS os dados fornecidos no bloco `[DADOS_CURSO_ENCONTRADO]` abaixo.
-- Se o dado diz "Necessário Estágio?: Não", você DEVE dizer que **não tem estágio**.
-- Se o dado diz "Prazo de Conclusão: Mínimo 6", você DEVE dizer que são **6 meses**.
-- NÃO use a "Carga Horária" para chutar a duração em meses. Use o campo "Tempo de Conclusão".
-- Se você não sabe uma informação, diga que vai verificar com a secretaria, NÃO INVENTE.
-- Se for buscar um curso, sua resposta de usuário deve ser neutra (ex: "Vou verificar...") e a tag `[CURSO_BUSCA] NOME DO CURSO` deve vir DEPOIS, em uma nova linha.
----
-### 10. REGRA DE CONTEXTO ATIVO (CRÍTICO)
-- Se o campo 'Contexto de Página (Curso)' no PERFIL DO CLIENTE já estiver preenchido com um curso:
-- **NÃO USE** a tag `[CURSO_BUSCA]` para procurar esse mesmo curso novamente ou cursos similares.
-- Assuma que você JÁ TEM os dados dele no bloco `[DADOS_CURSO_ENCONTRADO]`.
-- Use `[CURSO_BUSCA]` **SOMENTE** se o cliente disser EXPLICITAMENTE: "quero ver outro curso", "mudar de curso", "busque por X".
+### 9. REGRA DE OURO: FIDELIDADE AOS DADOS
+- Use APENAS os dados fornecidos no bloco `[DADOS_CURSO_ENCONTRADO]`.
+- Se o dado diz "Não", é NÃO.
+- Use `[CURSO_BUSCA]` SOMENTE se o cliente disser EXPLICITAMENTE o nome de um curso ou área nova.
 ---
 """
 
-    # 3. Construção do prompt base com TUDO
     prompt_base = f"""
 {prompt_persona}
 {prompt_regras}
@@ -294,7 +273,6 @@ def montar_prompt_base(perfil_cliente_prompt: str, dados_curso_injetados: Option
 {perfil_cliente_prompt}
 
 Sua tarefa principal é gerar a resposta conversacional.
-**Siga TODAS as regras definidas acima, especialmente a FIDELIDADE AOS DADOS e a PRESERVAÇÃO DO CONTEXTO.**
 """
     return prompt_completo
 
@@ -324,12 +302,11 @@ def montar_resposta_dividida(curso: dict, nome_cliente: str, resumido: bool = Fa
     
     if resumido:
          resposta_gancho = (f"Opção: **{nome}**\n" f"• **Tipo:** {tipo}\n" f"• **Área:** {area}")
-         return resposta_gancho, "" # Não retornamos dados ocultos no resumido
+         return resposta_gancho, "" 
     
     resposta_gancho = (f"Perfeito, {nome_cliente}! 🎓\n" f"Encontrei o curso de **{nome}**. Ele é uma **{tipo}** focada exatamente na área de **{area}**.")
     pergunta_fechamento = f"Isso se alinha com o que {nome_tratado} estava pensando? Se sim, já te passo mais detalhes sobre a duração e a modalidade dele. 😉"
     
-    # Adicionando o ID ao bloco de dados para garantir que a IA (se for chamada) possa usá-lo
     dados_para_contexto = f"""
     [DADOS_CURSO_ENCONTRADO: {nome}]
     =============================================
@@ -366,18 +343,16 @@ def atualizar_dados_cliente(session: ChatSession, mensagem_usuario: str, histori
         
     etiqueta_atualizada = False
     
-    # --- 1. CAPTURA DE TELEFONE (NOVO) ---
-    # Procura padrões como (11) 99999-9999, 11 999999999, etc.
+    # CAPTURA DE TELEFONE
     match_telefone = re.search(r'\(?\d{2}\)?\s?9?\d{4}[-.\s]?\d{4}', mensagem_usuario)
     if match_telefone:
         telefone_encontrado = match_telefone.group(0)
-        # Só atualiza se ainda não tivermos ou se for diferente
         if session.telefone_cliente != telefone_encontrado:
             session.telefone_cliente = telefone_encontrado
             etiqueta_atualizada = True
             print(f"LOG (Python): Telefone capturado: {telefone_encontrado}")
 
-    # --- 2. CAPTURA DE NOME (JÁ EXISTENTE) ---
+    # CAPTURA DE NOME
     if session.nome_cliente == "visitante":
         match_nome = re.search(r"(?:me chamo|meu nome é|sou o|sou|nome é)\s+([a-zA-Záéíóúâêôãõç]{3,})", msg_lower)
         if match_nome:
@@ -386,16 +361,14 @@ def atualizar_dados_cliente(session: ChatSession, mensagem_usuario: str, histori
             if nome.lower() not in ignored_words:
                 session.nome_cliente = nome
                 etiqueta_atualizada = True
-        # Lógica de fallback para nome curto
         elif "seu nome?" in last_bot_msg and len(mensagem_usuario.split()) <= 3:
              nome_extraido = mensagem_usuario.strip().title()
-             # Lista de palavras proibidas para evitar falsos positivos
              blacklist = ["olá", "oi", "sou", "tenho", "formado", "bacharel", "licenciado", "tecnólogo", "tudo", "bom", "claro", "sim", "não"]
              if nome_extraido.lower() not in blacklist and not any(char.isdigit() for char in nome_extraido):
                 session.nome_cliente = nome_extraido
                 etiqueta_atualizada = True
 
-    # --- 3. CAPTURA DE FORMAÇÃO (JÁ EXISTENTE) ---
+    # CAPTURA DE FORMAÇÃO
     if ("graduação" in last_bot_msg or "licenciatura" in last_bot_msg or "formação" in last_bot_msg) and \
        ("formado em" in msg_lower or "licenciado em" in msg_lower or "tenho" in msg_lower or "sou" in msg_lower or "bacharel" in msg_lower or "tecnólogo" in msg_lower) and \
        len(mensagem_usuario.split()) < 15:
@@ -443,25 +416,22 @@ def gerar_resposta_usuario(mensagem: str, session: ChatSession) -> Tuple[str, Ch
     dados_do_contexto = None 
     curso_selecionado_via_numero = None
     
+    # LAZY LOADING DE PROMPTS (CRUCIAL PARA VERCEL)
     if not PROMPTS_CARREGADOS:
         print("LOG (Python): Prompts não carregados. Tentando carregar agora...")
         sucesso = carregar_prompts_do_supabase()
         if not sucesso:
-             resposta_erro = "Desculpe, meu cérebro (IA) está offline."
-             session.historico.append(ChatMessage(role="assistant", content=resposta_erro))
-             return resposta_erro, session, None
+             # Se falhar, tentamos seguir sem prompts, mas o ideal é ter um fallback
+             print("!!! AVISO: Rodando sem prompts do banco.")
 
-    # SALVAR MSG USUARIO (O Python fará isso se não for a mensagem inicial)
     if mensagem != "...iniciar...":
         salvar_mensagem(session.nome_cliente, "user", mensagem)
     
     msg_lower = mensagem.lower()
     
-    # === ETAPA 1.1: INTERCEPTAR PERGUNTA SOBRE CARGA HORÁRIA (Defensive Bypass) ===
+    # === BYPASS CARGA HORÁRIA ===
     if session.curso_contexto and ("carga horaria" in msg_lower or "carga horária" in msg_lower):
-        print("LOG (Python): Interceptando pergunta sobre Carga Horária (Defensive Bypass).")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
-        
         if curso_obj and curso_obj.get('Carga Horária'):
             carga_horaria_txt = curso_obj.get('Carga Horária')
             nome_cliente_local = session.nome_cliente
@@ -473,20 +443,16 @@ Isso se encaixa no que você precisa para sua certificação ou evolução funci
 """.strip()
             session.historico.append(ChatMessage(role="assistant", content=resposta_cargahoraria))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_cargahoraria)
-            print(f"LOG (Python): Resposta forçada de Carga Horária: {carga_horaria_txt}")
             return resposta_cargahoraria, session, None
 
-    # === ETAPA 1.2: INTERCEPTAR PERGUNTA SOBRE ARTIGO/TCC/ESTÁGIO (Defensive Bypass) ===
+    # === BYPASS ARTIGO/ESTÁGIO ===
     if session.curso_contexto and ("artigo" in msg_lower or "tcc" in msg_lower or "estágio" in msg_lower or "estagio" in msg_lower):
-        print("LOG (Python): Interceptando pergunta sobre Artigo/Estágio (Defensive Bypass).")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
-        
         if curso_obj:
             artigo_val = curso_obj.get('Necessário Artigo?', 'Não Informado')
             estagio_val = curso_obj.get('Necessário Estágio?', 'Não Informado')
             nome_cliente_local = session.nome_cliente
             
-            # Lógica de Texto Melhorada
             if artigo_val == "Sim":
                 artigo_txt = "SIM. É um Artigo de Conclusão simples (12 a 16 páginas), sem apresentação em banca"
             else:
@@ -498,7 +464,7 @@ Isso se encaixa no que você precisa para sua certificação ou evolução funci
                 estagio_txt = "NÃO. O curso não exige cumprimento de horas de estágio"
 
             resposta_artigo_estagio = f"""
-{nome_cliente_local}! Sobre os requisitos acadêmicos do curso de **{session.curso_contexto}**:
+Oi, {nome_cliente_local}! Sobre os requisitos acadêmicos do curso de **{session.curso_contexto}**:
 
 * 📝 **TCC/Artigo:** {artigo_txt}.
 * 💼 **Estágio:** {estagio_txt}.
@@ -506,17 +472,13 @@ Isso se encaixa no que você precisa para sua certificação ou evolução funci
 No caso do Artigo, fique tranquilo: temos modelos prontos e tutoria para ajudar!
 Isso tira sua dúvida ou gostaria de saber mais sobre a metodologia? 😊
 """.strip()
-            
             session.historico.append(ChatMessage(role="assistant", content=resposta_artigo_estagio))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_artigo_estagio)
-            print("LOG (Python): Resposta forçada de Requisitos (Artigo/Estágio).")
             return resposta_artigo_estagio, session, None
             
-    # === ETAPA 1.3: INTERCEPTAR PERGUNTA SOBRE EMENTA (Defensive Bypass) ===
+    # === BYPASS EMENTA ===
     if session.curso_contexto and ("grade" in msg_lower or "ementa" in msg_lower):
-        print("LOG (Python): Interceptando pergunta sobre Ementa/Grade (Defensive Bypass).")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
-        
         if curso_obj and curso_obj.get('Ementa'):
             ementa_link = curso_obj.get('Ementa')
             nome_cliente_local = session.nome_cliente
@@ -527,48 +489,40 @@ Ah, sim! A ementa é super importante, {nome_cliente_local}. 😊
 Você pode acessar a ementa completa do curso de **{session.curso_contexto}** por este link: [Ementa Completa]({ementa_link})
 
 Dê uma olhadinha com calma e me diga o que achou, combinado?
-"""
+""".strip()
             session.historico.append(ChatMessage(role="assistant", content=resposta_ementa))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_ementa)
-            print("LOG (Python): Resposta forçada de Ementa/Grade.")
             return resposta_ementa, session, None
 
-    # === ETAPA 1.4: INTERCEPTAR PERGUNTA SOBRE MEC/RECONHECIMENTO (Defensive Bypass) ===
+    # === BYPASS MEC ===
     if session.curso_contexto and ("mec" in msg_lower or "reconhecimento" in msg_lower or "valida" in msg_lower):
-        print("LOG (Python): Interceptando pergunta sobre MEC/Reconhecimento (Defensive Bypass).")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
-        
         if curso_obj and curso_obj.get('Link e-MEC Curso'):
             link_mec = curso_obj.get('Link e-MEC Curso')
             nome_cliente_local = session.nome_cliente
-            
-            # Formato Markdown [label](link)
             link_markdown = f"[Link para o e-MEC]({link_mec})"
             
             resposta_mec = f"""
-Compreendo perfeitamente sua pergunta, {nome_cliente_local}! É super importante ter essa segurança sobre o reconhecimento do curso.
+Compreendo perfeitamente sua pergunta, {nome_cliente_local}!
 
 Sim, a **{session.curso_contexto}** é totalmente reconhecida pelo MEC! Isso significa que seu diploma terá validade em todo o território nacional.
 
 Você pode verificar o reconhecimento diretamente no site do e-MEC, através deste link: {link_markdown}
 
-Ter essa garantia é fundamental para sua jornada profissional, não é mesmo, {nome_cliente_local}? ✨
-"""
+Ter essa garantia é fundamental para sua jornada profissional, não é mesmo? ✨
+""".strip()
             session.historico.append(ChatMessage(role="assistant", content=resposta_mec))
             salvar_mensagem(session.nome_cliente, "assistant", resposta_mec)
-            print("LOG (Python): Resposta forçada de Reconhecimento MEC.")
             return resposta_mec, session, None
 
-    # === INTERCEPTAÇÃO DE NÚMEROS (PRIORIDADE MÁXIMA - BYPASS GEMINI) ===
+    # === INTERCEPTAÇÃO DE NÚMEROS ===
     match_numero = re.match(r"^(\d+)$", mensagem.strip())
     if match_numero and session.historico and session.historico[-1].role == "assistant":
         try:
             last_msg = session.historico[-1].content
             opcoes = re.findall(r"\n(\d+)\.\s+(.*?)(?=\n|$)", last_msg)
-            
             if opcoes:
                 indice_escolhido = int(match_numero.group(1))
-                
                 curso_selecionado_via_numero = None
                 for num_str, nome_curso in opcoes:
                     if int(num_str) == indice_escolhido:
@@ -576,22 +530,13 @@ Ter essa garantia é fundamental para sua jornada profissional, não é mesmo, {
                         break
                 
                 if curso_selecionado_via_numero:
-                    print(f"LOG (Python): Usuário digitou '{{mensagem}}' -> Interpretado como seleção de curso: {{curso_selecionado_via_numero}}")
-                    
-                    # 1. Tenta buscar o curso completo imediatamente
                     curso_obj = buscar_curso_por_nome_exato(curso_selecionado_via_numero, completo=True)
 
                     if curso_obj:
-                        # LOGS DE DEBUG
-                        print(f"LOG (DEBUG): Curso ID {curso_obj.get('id')} ENCONTRADO com SUCESSO via seleção numérica.")
-                        
                         session.curso_contexto = curso_selecionado_via_numero
                         nome_cliente_local = session.nome_cliente
-                        
-                        # 2. Monta o bloco de dados oculto 
                         _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, nome_cliente_local, resumido=False)
 
-                        # --- GERAÇÃO DA RESPOSTA DETALHADA DIRETO NO PYTHON (ETAPA 5.1) ---
                         modalidade_txt = curso_obj.get('Modalidade', 'Não Informada')
                         prazo_txt = curso_obj.get('Prazo de Conclusão', 'Consulte a Duração')
                         requisito_txt = curso_obj.get('Pré Requesito para Matrícula', 'Não Informado')
@@ -599,11 +544,9 @@ Ter essa garantia é fundamental para sua jornada profissional, não é mesmo, {
                         
                         artigo_val = curso_obj.get('Necessário Artigo?', 'Não Informado')
                         estagio_val = curso_obj.get('Necessário Estágio?', 'Não Informado')
-                        
                         artigo_txt = "Sim" if artigo_val == "Sim" else "Não"
                         estagio_txt = "Sim" if estagio_val == "Sim" else "Não"
                         
-                        # 3. CONSTRÓI A RESPOSTA CONVERSACIONAL COM DADOS REAIS
                         resposta_detalhada_python = f"""
 Perfeito, {nome_cliente_local}! 🎓 Você escolheu o curso de **{curso_obj.get('Nome dos cursos')}**.
                          
@@ -614,66 +557,36 @@ Vou te passar os detalhes acadêmicos:
 * Requisitos de conclusão: **Artigo/TCC**: {artigo_txt}. **Estágio**: {estagio_txt}.
 
 Isso se alinha com o que você imaginava para o curso?
-"""
+""".strip()
                         
-                        # 4. Atualiza o histórico (HIDDEN e a resposta)
                         session.historico.append(ChatMessage(role="assistant", content=f"HIDDEN:{dados_ocultos}"))
                         session.historico.append(ChatMessage(role="assistant", content=resposta_detalhada_python))
                         salvar_mensagem(session.nome_cliente, "assistant", resposta_detalhada_python)
-                        print("LOG (Python): Resposta forçada após seleção numérica. Bypassing Gemini call.")
-
-                        # Salvando o lead após a definição do curso
                         salvar_lead_chat(session)
                         return resposta_detalhada_python, session, None
-                    else:
-                         # Se o curso não for achado (DB ou nome errado), damos uma mensagem de erro controlada.
-                         resposta_erro_bypass = f"Ops, {session.nome_cliente}. Não consegui carregar os detalhes do curso que você digitou. Por favor, tente digitar o nome completo do curso ou selecione outra opção."
-                         session.historico.append(ChatMessage(role="assistant", content=resposta_erro_bypass))
-                         salvar_mensagem(session.nome_cliente, "system_error", resposta_erro_bypass)
-                         return resposta_erro_bypass, session, None
-
-            # Se a opção numérica existir, mas o curso não for encontrado (else/except), cairemos aqui
-            # para continuar para o Gemini, que é onde a lista errada é gerada.
-            # O bloco 'else' está ausente, o que faria o fluxo cair direto para o Gemini
         except Exception as e:
-            # Em caso de erro de REGEX ou INT, informamos o usuário.
             print(f"!!! CRITICAL BYPASS ERROR: {e}") 
-            resposta_erro_critico = f"Desculpe, {session.nome_cliente}. Ocorreu um erro interno ao processar sua escolha numérica. Por favor, tente novamente ou digite o nome completo do curso."
-            session.historico.append(ChatMessage(role="assistant", content=resposta_erro_critico))
-            salvar_mensagem(session.nome_cliente, "system_error", resposta_erro_critico)
-            return resposta_erro_critico, session, None
-
-    # =========================================================================
     
     # Se o fluxo forçado não retornou, continuamos para o Gemini.
     if curso_selecionado_via_numero and not curso_selecionado_via_numero.startswith("Quero saber mais"):
         mensagem = f"Quero saber mais sobre o curso {curso_selecionado_via_numero}"
 
-
     historico_recente_bot = [msg for msg in session.historico if msg.role == "assistant"]
     
-    # 2. SE NÃO HOUVE BYPASS, VERIFICA E ATUALIZA O CONTEXTO PARA O GEMINI
     if session.curso_contexto:
-        print(f"LOG (Python): Contexto ativo: {session.curso_contexto}. Atualizando dados...")
         curso_obj = buscar_curso_por_nome_exato(session.curso_contexto, completo=True)
         if curso_obj:
             _, dados_ocultos, _ = montar_resposta_dividida(curso_obj, session.nome_cliente)
             dados_do_contexto = dados_ocultos
         else:
-            print(f"!!! ALERTA (Python): Curso do contexto '{session.curso_contexto}' não achado no DB. Limpando contexto.")
             session.curso_contexto = None
 
     if mensagem != "...iniciar...":
-        # ATUALIZA AS ETIQUETAS COM BASE NA ÚLTIMA MENSAGEM DO USUÁRIO
         atualizar_dados_cliente(session, mensagem, historico_recente_bot)
-        # Adiciona a mensagem re-escrita ou original ao histórico da sessão
         session.historico.append(ChatMessage(role="user", content=mensagem))
     
     nome_cliente_local = session.nome_cliente
-    
-    # === CHAMADA PARA SALVAR LEAD A CADA ATUALIZAÇÃO DE PERFIL ===
     salvar_lead_chat(session) 
-    # ==========================================================
 
     perfil_cliente_prompt = f"""
 ---
@@ -709,8 +622,6 @@ Histórico recente da conversa:
 {historico_limpo_str}
 
 Nova mensagem do usuário: "{mensagem}"
-
-OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver escolhido uma opção, assuma que o curso escolhido é o foco agora e use os dados dele.
 """
 
     try:
@@ -729,9 +640,7 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
         match_busca = re.search(r"\[CURSO_BUSCA\]\s*(.*)\b([a-zA-Z\s\-áéíóúâêôãõç]{5,}[a-zA-Záéíóúâêôãõç])\s*$", resposta_bruta, re.IGNORECASE | re.DOTALL)
 
         if match_nav:
-            print("LOG (Python): IA solicitou [NAVEGAR_PARA]")
             resposta_ia_conversacional = resposta_bruta.split(match_nav.group(0))[0].strip()
-            
             curso_para_navegar = session.curso_contexto
             if not curso_para_navegar and dados_do_contexto:
                  match_dados = re.search(r"\[DADOS_CURSO_ENCONTRADO:\s*(.*?)\]", dados_do_contexto)
@@ -739,31 +648,22 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
                      curso_para_navegar = match_dados.group(1).strip()
 
             if curso_para_navegar:
-                print(f"LOG (Python): Navegando para: {curso_para_navegar}")
                 curso_obj = buscar_curso_por_nome_exato(curso_para_navegar, completo=False)
                 if curso_obj and curso_obj.get('id'):
                     navegar_para_link = f"/curso/{curso_obj.get('id')}"
-            else:
-                 print("!!! ERRO (Python): IA pediu para navegar mas não achou curso.")
             
             salvar_mensagem(session.nome_cliente, "assistant", resposta_ia_conversacional)
 
         elif match_busca: 
-            print("LOG (Python): IA solicitou [CURSO_BUSCA]")
             resposta_ia_conversacional = resposta_bruta.split(match_busca.group(0))[0].strip()
             termo_principal = match_busca.group(2).strip()
             
-            # === BLINDAGEM DE CONTEXTO ===
-            # Se já temos contexto e a busca é redundante, ignoramos
             if session.curso_contexto and termo_principal.lower() in session.curso_contexto.lower():
-                 print("LOG (Python): Busca redundante. Mantendo contexto.")
                  cursos_encontrados_raw = []
             else:
                  cursos_encontrados_raw = buscar_cursos_relevantes(termo_principal, session.area_preferencial)
-            # =============================
             
             if cursos_encontrados_raw:
-                # Se tivermos objetos completos (do force search), não precisamos re-buscar por ID
                 if 'Nome dos cursos' not in cursos_encontrados_raw[0]: 
                     ids_cursos = [c['id'] for c in cursos_encontrados_raw]
                     resp_completos = supabase.table("cursos").select("*").in_("id", ids_cursos).execute()
@@ -776,35 +676,25 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
                 return resposta_falha, session, None
             
             if len(cursos_encontrados_raw) == 1:
-                print("LOG (Python): 1 curso encontrado.")
                 curso = cursos_encontrados_raw[0]
                 session.curso_contexto = curso.get('Nome dos cursos')
-                
                 gancho, dados_ocultos, pergunta = montar_resposta_dividida(curso, nome_cliente_local, resumido=False)
-                
                 session.historico.append(ChatMessage(role="assistant", content=f"HIDDEN:{dados_ocultos}"))
-                
                 resposta_final = f"{resposta_ia_conversacional}\n\n{gancho}\n\n{pergunta}"
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
-                
                 salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
                 return resposta_final, session, None
 
             if len(cursos_encontrados_raw) > 1:
-                print(f"LOG (Python): {len(cursos_encontrados_raw)} cursos encontrados. Listando opções numeradas.")
-                
                 resposta_final = resposta_ia_conversacional + "\n\nEncontrei estas opções:\n"
                 for i, curso in enumerate(cursos_encontrados_raw, 1):
                      nome_do_curso = curso.get('Nome dos cursos', 'Curso')
                      resposta_final += f"\n{i}. {nome_do_curso}"
-                
                 resposta_final += "\n\nPor favor, digite o **número** da opção que deseja conhecer melhor (ex: 1)."
-                
                 session.historico.append(ChatMessage(role="assistant", content=resposta_final))
                 salvar_mensagem(session.nome_cliente, "assistant", resposta_final)
                 return resposta_final, session, None
                         
-        print("LOG (Python): Resposta conversacional normal.")
         session.historico.append(ChatMessage(role="assistant", content=resposta_ia_conversacional))
         salvar_mensagem(session.nome_cliente, "assistant", resposta_ia_conversacional)
         return resposta_ia_conversacional, session, navegar_para_link
@@ -816,18 +706,18 @@ OBSERVAÇÃO: Se o histórico mostrar uma lista numerada e o usuário tiver esco
         salvar_mensagem(session.nome_cliente, "system_error", str(e))
         return resposta_erro, session, None
 
+# === ROTAS COM PREFIXO /api PARA VERCEL ===
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     print(f"\n--- LOG (Python) API: Nova Requisição Recebida ---")
     try:
         resposta_bot, session_atualizada, navegar_para = gerar_resposta_usuario(request.mensagem, request.session)
-        # NOVO LOG PARA ACOMPANHAR A SESSÃO ATUALIZADA
         print(
             "LOG (ChatProvider) SESSÃO ATUALIZADA:", 
             json.dumps({ 
                 "nome": session_atualizada.nome_cliente, 
-                "telefone": session_atualizada.telefone_cliente, # NOVO LOG
+                "telefone": session_atualizada.telefone_cliente,
                 "curso": session_atualizada.curso_contexto,
                 "formacao": session_atualizada.formacao_cliente,
             })
@@ -841,16 +731,20 @@ async def chat_endpoint(request: ChatRequest):
         print(f"!!! ERRO FATAL (Python) Desconhecido: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {e}")
 
-@app.post("/refresh-prompts", status_code=200)
+@app.post("/api/refresh-prompts", status_code=200)
 async def refresh_prompts():
     sucesso = carregar_prompts_do_supabase()
     if sucesso: return {"status": "sucesso", "prompts_carregados": len(PROMPTS_MODULARES)}
     else: raise HTTPException(status_code=500, detail="Falha ao recarregar prompts.")
 
-@app.get("/")
-def root(): return {"status": "API do Bot ESP (v5.3 - Name Fix) está online!"}
+@app.get("/api/")
+def root(): return {"status": "API do Bot ESP (v5.3 - Vercel Ready) está online!"}
 
+# Se rodar localmente, usar uvicorn (Vercel ignora isso)
 if __name__ == "__main__":
+    import uvicorn
+    # Carrega prompts ao iniciar localmente
     carregar_prompts_do_supabase()
-    print("LOG (Python): Iniciando servidor FastAPI localmente na porta 8000...")
+    print("LOG (Python): Iniciando servidor FastAPI localmente...")
+    # Rodando na porta 8000 e liberando para a rede local (0.0.0.0)
     uvicorn.run("bot_api:app", host="0.0.0.0", port=8000, reload=True)
